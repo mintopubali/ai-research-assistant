@@ -50,6 +50,10 @@ MODEL_PRICES: dict[str, ModelPrice] = {
     "claude-sonnet-4-6": ModelPrice(prompt_per_1m=3.00, completion_per_1m=15.00),
     # GLM (Zhipu)
     "glm-5.1": ModelPrice(prompt_per_1m=0.50, completion_per_1m=1.50),
+    # Google Gemini
+    "gemini-3.1-flash-lite": ModelPrice(prompt_per_1m=0.075, completion_per_1m=0.30),
+    "gemini-3.1-flash-lite-preview": ModelPrice(prompt_per_1m=0.075, completion_per_1m=0.30),
+    "gemini-2.5-flash": ModelPrice(prompt_per_1m=0.075, completion_per_1m=0.30),
 }
 
 

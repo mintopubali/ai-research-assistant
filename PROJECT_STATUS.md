@@ -62,16 +62,16 @@
 - [x] **Day 3: Custom Dataset & Mini Benchmark**
   - [x] `eval_data/ml_papers_v1/`-এ ৩টি ক্লাসিক পেপার (Attention, RAG, LoRA) যোগ ও ভেরিফাই করা (৪৬০ চাঙ্ক)।
   - [x] ১০টি গোল্ডেন প্রশ্ন তৈরি করে একটি মিনি-ইভ্যালুয়েশন রান চালানো (Recall@K ও Faithfulness, ০ টোকেন খরচ)।
-- [ ] **Day 4: Thesis Report / Proposal Draft**
-  - [ ] `Architecture.md` এবং ADRs ব্যবহার করে চ্যাপ্টার ১ থেকে ৪ লেখা।
-- [ ] **Day 5: Results & Report Completion**
-  - [ ] মিনি বেঞ্চমার্কের টেবিল ও গ্রাফ চ্যাপ্টার ৫-এ বসিয়ে চ্যাপ্টার ৬ সহ ফাইনাল রিপোর্ট সম্পন্ন করা।
-- [ ] **Day 6: Defence Presentation Slide Deck**
-  - [ ] ১২-১৪ স্লাইডের প্রেজেন্টেশন ডেক প্রস্তুত করা।
-  - [ ] আর্কিটেকচার ডায়াগ্রাম ও লাইভ ডেমো স্ক্রিনশট বসানো।
-- [ ] **Day 7: Mock Defence & Rehearsal**
-  - [ ] এক্সামিনারদের সম্ভাব্য ৭টি ট্র্যাপ প্রশ্ন প্র্যাকটিস করা।
-  - [ ] অফলাইন ফলব্যাক ডেমো রেডি রাখা।
+- [x] **Day 4: Thesis Report / Proposal Draft**
+  - [x] `docs/Architecture.md` এবং ADRs ব্যবহার করে চ্যাপ্টার ১ থেকে ৪ লেখা।
+- [x] **Day 5: Results & Report Completion**
+  - [x] মিনি বেঞ্চমার্কের টেবিল চ্যাপ্টার ৫-এ বসিয়ে চ্যাপ্টার ৬ সহ ফাইনাল রিপোর্ট সম্পন্ন করা (`docs/THESIS_REPORT_DRAFT.md`)।
+- [x] **Day 6: Defence Presentation Slide Deck**
+  - [x] ১৪ স্লাইডের পূর্ণাঙ্গ প্রেজেন্টেশন ডেক ও স্পিকার নোটস প্রস্তুত করা (`docs/DEFENSE_SLIDES.md`)।
+  - [x] আর্কিটেকচার ডায়াগ্রাম ও লাইভ ডেমো স্ক্রিপ্ট সাজানো।
+- [x] **Day 7: Mock Defence & Rehearsal**
+  - [x] এক্সামিনারদের সম্ভাব্য ৭টি ট্র্যাপ প্রশ্ন ও বিশদ উত্তর প্রস্তুত করা (`docs/MOCK_DEFENSE_QA.md`)।
+  - [x] অফলাইন ফলব্যাক ডেমো (`DummyAdapter` / `Ollama`) রেডি রাখা।
 
 ---
 

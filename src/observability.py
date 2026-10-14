@@ -45,7 +45,8 @@ def init_observability(otlp_endpoint: str | None = None) -> None:
     global _INITIALIZED
     if _INITIALIZED:
         return
-    _INITIALIZED = True
+    if os.getenv("ENABLE_OTEL", "false").lower() not in ("true", "1"):
+        return
 
     endpoint = otlp_endpoint or os.getenv("OTLP_ENDPOINT", "http://localhost:6006/v1/traces")
 
