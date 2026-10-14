@@ -1,0 +1,480 @@
+"""
+EvalPipeline factory — builds a fresh, isolated RAG pipeline from an
+EvalConfig + dataset name.
+
+Eval Harness Position:
+  EvalConfig + dataset → [PIPELINE FACTORY] → EvalPipeline
+                                                  ↓
+                                          ingest → query → teardown
+                                          (used by EvalRunner)
+
+Design decisions:
+  - Ephemeral Chroma collection per (config, dataset) so two concurrent
+    runs cannot pollute each other's vectors. Random suffix on the
+    collection name guards against collisions.
+  - retrieve->generate is delegated to the shared QueryEngine (issue #16,
+    step 4c): the levers become a composed Retriever behind the seam, and the
+    prompt / context / telemetry come from production's one module — so eval
+    measures the pipeline that is actually shipped, not a hand-copied twin.
+  - Test doubles (DummyLLM) inject via *_override params; production
+    uses LLMHandler(model_name).
+
+Return type of query():
+  - Returns list[SearchResult] (from vector_store.SearchResult), not
+    list[Chunk]. SearchResult carries chunk_id + score which the runner
+    needs for retrieval metrics. The test asserts only isinstance(chunks, list)
+    so this type is compatible.
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import chromadb
+
+from src.domain import SearchResult
+from src.eval.config import EvalConfig
+from src.eval.schemas import EvalQuestion
+from src.ingestion import TextChunker
+from src.llm_handler import LLMHandler
+from src.query_engine import QueryEngine
+from src.retrieval import (
+    CrossEncoderReranker,
+    DenseRetriever,
+    QueryRewriter,
+    RefusalHandler,
+    Retriever,
+)
+from src.retrieval.composition import compose_retrieval
+from src.vector_store import ChromaVectorStore
+
+logger = logging.getLogger(__name__)
+
+# WHY a module constant: the ML-papers corpus manifest path is a deployment
+#      fact, and EvalPipeline takes it as a field so a test can point elsewhere.
+DEFAULT_ML_PAPERS_MANIFEST = Path("eval_data/ml_papers_v1/corpus_manifest.json")
+
+
+# --------------------------------------------------------------------------- #
+# EvalPipeline                                                                 #
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class EvalPipeline:
+    """An isolated, ephemeral RAG pipeline for one (config, dataset) eval run.
+
+    Teaches: the factory pattern — consumers never call __init__ directly;
+    they use build_pipeline() which sets up all components and wires them
+    into a coherent, ready-to-use pipeline.
+
+    Why ephemeral Chroma: each pipeline gets its own collection with a
+    random suffix, so parallel eval runs cannot pollute each other's vectors.
+    teardown() deletes the collection after the run completes.
+    """
+
+    chunker: TextChunker
+    vector_store: ChromaVectorStore
+    llm: Any  # LLMHandler or a test double with .generate(prompt, system_prompt)
+    judge_llm: Any  # Same contract as llm
+    config: EvalConfig
+    dataset_name: str
+
+    # Phase 2 additions — None when the corresponding lever is off. Composed into
+    # a single Retriever by _get_engine(); the refusal gate is passed to the engine.
+    # WHY the hybrid retriever is no longer built during ingest: it used to take
+    #      a corpus snapshot, so it could only be constructed once chunks
+    #      existed — which is also why production could not have it at all. It
+    #      now tracks the store's revision (ADR 0009), so build_pipeline wires
+    #      it up front like every other lever.
+    hybrid_retriever: Retriever | None = None
+    reranker: CrossEncoderReranker | None = None
+    rewriter: QueryRewriter | None = None
+    refusal_handler: RefusalHandler | None = None
+
+    # Private: needed for teardown() — ChromaVectorStore doesn't own the client.
+    # WHY not reach into vector_store._collection._client: that would couple us
+    # to ChromaDB internals that could change. Own the client reference here.
+    _client: chromadb.ClientAPI = field(repr=False, default=None)  # type: ignore[assignment]
+    _collection_name: str = field(repr=False, default="")
+
+    # WHY a field rather than a literal inside _ingest_ml_papers: the path was
+    # hardcoded at the call site, which made the whole 58-line ingest branch
+    # unreachable in a test — the only path a test could take was the
+    # missing-manifest no-op.
+    ml_papers_manifest: Path = field(default=DEFAULT_ML_PAPERS_MANIFEST)
+
+    # Lazily-built QueryEngine, cached after the first query(). Deferred so a
+    # run that never queries never pays for the cross-encoder download.
+    _engine: QueryEngine | None = field(repr=False, default=None)
+
+    def ingest(self, questions: list[EvalQuestion]) -> None:
+        """Upsert question contexts into the vector store.
+
+        For squad_v2_dev_200:
+          Each question carries its context in metadata["context"]. The context
+          IS the chunk — SQuAD is designed so each question has exactly one
+          supporting passage. question.id serves as the Chroma document ID,
+          which makes gold_chunk_id lookup trivial in the retrieval metric.
+
+        For ml_papers_v1:
+          Loads corpus_manifest.json, reads each pinned PDF via DocumentLoader,
+          chunks it with this pipeline's TextChunker, and upserts the chunks.
+          If the manifest is missing or empty, ingest is a no-op (logged).
+
+        Args:
+            questions: Gold-labeled questions from the dataset loader.
+        """
+        if self.dataset_name == "squad_v2_dev_200":
+            self._ingest_squad(questions)
+        elif self.dataset_name == "ml_papers_v1":
+            self._ingest_ml_papers()
+        else:
+            logger.warning("Unknown dataset %r — ingest is a no-op.", self.dataset_name)
+
+    def _ingest_squad(self, questions: list[EvalQuestion]) -> None:
+        """Upsert each question's context as one Chroma document.
+
+        PATTERN: question.id == chunk_id == gold_chunk_id. This alignment
+        means the retrieval metric can check retrieved IDs directly against
+        EvalQuestion.gold_chunk_ids without any translation layer.
+        """
+        ids: list[str] = []
+        documents: list[str] = []
+        metadatas: list[dict[str, Any]] = []
+
+        for q in questions:
+            ctx = q.metadata.get("context", "")
+            if not ctx:
+                logger.warning("SQuAD question %s has no context — skipping.", q.id)
+                continue
+            ids.append(q.id)
+            documents.append(ctx)
+            # WHY include doc_id matching chunk_id: ChromaVectorStore.delete_by_doc_id
+            # filters on metadata["doc_id"]. We don't use deletion in eval, but
+            # keeping the schema consistent with production reduces surprises.
+            metadatas.append({"doc_id": q.id, "question_id": q.id})
+
+        if ids:
+            self.vector_store.upsert(ids=ids, documents=documents, metadatas=metadatas)
+            logger.info("Ingested %d SQuAD contexts into '%s'.", len(ids), self._collection_name)
+
+    def _ingest_ml_papers(self) -> None:
+        """Load, chunk, and upsert PDFs listed in corpus_manifest.json.
+
+        WHY graceful no-op on missing manifest: the ML Papers dataset ships
+        with an empty manifest skeleton so tests pass before any PDFs are
+        labeled. A missing manifest is not an error for the eval harness —
+        it means no papers have been added yet.
+        """
+        import json
+
+        from src.ingestion import DocumentLoader
+
+        manifest_path = self.ml_papers_manifest
+        if not manifest_path.exists():
+            logger.info("ML Papers manifest not found at %s — ingest is a no-op.", manifest_path)
+            return
+
+        with manifest_path.open() as f:
+            manifest = json.load(f)
+
+        papers = manifest.get("papers", [])
+        if not papers:
+            logger.info("ML Papers manifest has no papers — ingest is a no-op.")
+            return
+
+        loader = DocumentLoader()
+        for paper in papers:
+            local_path = Path(paper["local_path"])
+            try:
+                doc = loader.load(local_path)
+            except (FileNotFoundError, ValueError) as exc:
+                logger.warning("Skipping paper %s: %s", paper.get("id"), exc)
+                continue
+
+            chunks = self.chunker.chunk(doc)
+            if not chunks:
+                continue
+
+            self.vector_store.upsert(
+                ids=[c.chunk_id for c in chunks],
+                documents=[c.content for c in chunks],
+                metadatas=[{"doc_id": c.doc_id, "paper_id": paper.get("id", "")} for c in chunks],
+            )
+            logger.info("Ingested paper %s: %d chunks.", paper.get("id"), len(chunks))
+
+    def query(self, question: str) -> tuple[list[SearchResult], str, dict]:
+        """Retrieve chunks and generate an answer via the shared QueryEngine.
+
+        The levers become a composed Retriever behind the seam (hybrid-or-dense,
+        wrapped in multi-query and reranking adapters as configured); the engine
+        applies the refusal gate, builds the shipped prompt + context, and
+        assembles telemetry. This is the convergence that makes eval measure the
+        production pipeline (issue #16, step 4c).
+
+        Args:
+            question: Natural language question from the eval set.
+
+        Returns:
+            Tuple of (chunks, answer, telemetry). telemetry keys:
+                timings_ms: {"retrieve": float, "generate": float}
+                tokens: {"prompt": int, "completion": int}
+                cost_usd: float
+        """
+        results, answer, stage = self._get_engine().ask(question)
+        return (
+            results,
+            answer,
+            {
+                "timings_ms": {"retrieve": stage.retrieve_ms, "generate": stage.generate_ms},
+                "tokens": {"prompt": stage.prompt_tokens, "completion": stage.completion_tokens},
+                "cost_usd": stage.cost_usd,
+            },
+        )
+
+    def _get_engine(self) -> QueryEngine:
+        """Build (once) and return the QueryEngine composed from the configured levers.
+
+        Built lazily so the cross-encoder is only downloaded by a run that
+        actually queries. The lever composition is the Retriever seam used as
+        designed: multi-query wraps the base retriever, reranking wraps that.
+        """
+        if self._engine is not None:
+            return self._engine
+
+        # BEFORE: this stacked the adapters and derived top_k here, so the same
+        #         rule existed in two modules and production had no equivalent
+        #         of the top_k half at all.
+        # AFTER:  one composition owner, shared with production's presets.
+        plan = compose_retrieval(
+            base=self.hybrid_retriever or DenseRetriever(self.vector_store),
+            rewriter=self.rewriter,
+            reranker=self.reranker,
+            top_k=self.config.pipeline.retriever.top_k,
+            rerank_over_fetch_n=self.config.pipeline.reranker.rerank_top_n,
+            rerank_final_top_k=self.config.pipeline.reranker.final_top_k,
+        )
+        # reasoning_llm is unused on the sync ask() path (the eval harness never
+        # streams), so the answer LLM stands in for the constructor requirement.
+        self._engine = QueryEngine(
+            retriever=plan.retriever,
+            llm=self.llm,
+            reasoning_llm=self.llm,
+            top_k=plan.top_k,
+            refusal=self.refusal_handler,
+        )
+        return self._engine
+
+    def teardown(self) -> None:
+        """Delete the ephemeral Chroma collection and release the client reference.
+
+        WHY idempotent: the test suite may call teardown() in a finally block
+        after the collection was already deleted explicitly. A double-call must
+        be a silent no-op, not an exception.
+        """
+        if self._client is None or not self._collection_name:
+            return  # already torn down
+
+        try:
+            self._client.delete_collection(self._collection_name)
+            logger.debug("Deleted Chroma collection '%s'.", self._collection_name)
+        except Exception as exc:
+            # Not-found is the common idempotency case; log and continue.
+            logger.debug("teardown: delete_collection raised (already gone?): %s", exc)
+        finally:
+            # Null out so a subsequent call is a no-op (idempotency guarantee).
+            self._client = None  # type: ignore[assignment]
+            self._collection_name = ""
+
+
+# --------------------------------------------------------------------------- #
+# Factory                                                                      #
+# --------------------------------------------------------------------------- #
+
+
+def build_pipeline(
+    config: EvalConfig,
+    dataset_name: str,
+    llm_override: object | None = None,
+    judge_llm_override: object | None = None,
+) -> EvalPipeline:
+    """Construct a fresh, isolated EvalPipeline for a (config, dataset) pair.
+
+    Teaches: the factory function pattern — all wiring happens here so callers
+    receive a ready-to-use object with no boilerplate. Each call produces an
+    independent Chroma collection so concurrent runs don't share state.
+
+    Args:
+        config: Validated EvalConfig specifying chunker, retriever, generator,
+                and eval parameters.
+        dataset_name: Name key identifying which dataset the pipeline handles
+                      (e.g. "squad_v2_dev_200", "ml_papers_v1").
+        llm_override: If provided, use this object as the answer LLM instead
+                      of building an LLMHandler. Primarily for test doubles.
+        judge_llm_override: If provided, use this object as the judge LLM.
+
+    Returns:
+        A configured EvalPipeline ready for ingest() → query() → teardown().
+    """
+    # ---- Chunker ---------------------------------------------------------------
+    chunker_cfg = config.pipeline.chunker
+    chunker = TextChunker(
+        chunk_size=chunker_cfg.chunk_size,
+        chunk_overlap=chunker_cfg.chunk_overlap,
+        strategy=chunker_cfg.strategy,
+    )
+
+    # ---- Embedder (lever 2b) ---------------------------------------------------
+    # WHY build before the collection: Chroma binds an EmbeddingFunction to the
+    # collection at creation time and uses it for all subsequent upserts/queries.
+    embedder_cfg = config.pipeline.embedder
+    embedding_function = _build_embedding_function(embedder_cfg)
+
+    # ---- Chroma collection (ephemeral — lives only for this pipeline) ----------
+    # WHY EphemeralClient: no disk I/O, no port, no cleanup needed beyond
+    # client.delete_collection(). Perfectly isolated per build_pipeline() call.
+    # WHY random suffix: prevents name collisions if two pipelines with the
+    # same config+dataset names are built in the same process.
+    # NOTE: First call auto-downloads all-MiniLM-L6-v2 ONNX (~80MB) if not cached.
+    collection_name = f"eval_{config.name}_{dataset_name}_{uuid.uuid4().hex[:6]}"
+    client = chromadb.EphemeralClient()
+    # WHY .open: the cosine setting the score conversion depends on belongs to
+    # the store, not to each caller. See ChromaVectorStore.SPACE_METADATA.
+    vector_store = ChromaVectorStore.open(
+        client, collection_name, embedding_function=embedding_function
+    )
+
+    # ---- LLM handlers ----------------------------------------------------------
+    llm = llm_override if llm_override is not None else LLMHandler(config.pipeline.generator.model)
+    judge_llm = (
+        judge_llm_override
+        if judge_llm_override is not None
+        else LLMHandler(config.eval.judge_model)
+    )
+
+    return EvalPipeline(
+        chunker=chunker,
+        vector_store=vector_store,
+        llm=llm,
+        judge_llm=judge_llm,
+        config=config,
+        dataset_name=dataset_name,
+        hybrid_retriever=_build_hybrid_retriever(config.pipeline.hybrid, vector_store),
+        reranker=_build_reranker(config.pipeline.reranker),
+        rewriter=_build_rewriter(config.pipeline.query_rewriter, llm=llm),
+        refusal_handler=_build_refusal(config.pipeline.refusal_handler),
+        _client=client,
+        _collection_name=collection_name,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2 component builders                                                   #
+# --------------------------------------------------------------------------- #
+
+
+def _build_embedding_function(cfg) -> object:
+    """Build the Chroma EmbeddingFunction for the given embedder config.
+
+    Args:
+        cfg: EmbedderCfg with a `name` field identifying the embedder variant.
+
+    Returns:
+        A Chroma-compatible EmbeddingFunction instance.
+
+    Raises:
+        ValueError: If cfg.name is not a known embedder key.
+    """
+    if cfg.name == "chroma_default":
+        from chromadb.utils import embedding_functions
+
+        return embedding_functions.DefaultEmbeddingFunction()
+    if cfg.name == "bge_small_en_v1_5":
+        from src.eval.embedders import BgeEmbedder
+
+        return BgeEmbedder()
+    raise ValueError(f"Unknown embedder name: {cfg.name}")
+
+
+def _build_hybrid_retriever(cfg, vector_store):
+    """Build BM25HybridRetriever if hybrid is enabled, else return None.
+
+    Args:
+        cfg: HybridCfg specifying enabled flag and RRF/top-k parameters.
+        vector_store: The collection both halves of the retriever read. The
+            retriever mirrors it into a BM25 index and refreshes that index
+            whenever the store's revision moves, so it may be built before
+            anything has been ingested.
+
+    Returns:
+        BM25HybridRetriever when cfg.enabled, else None.
+    """
+    if not cfg.enabled:
+        return None
+    from src.retrieval import BM25HybridRetriever
+
+    return BM25HybridRetriever(
+        vector_store=vector_store,
+        bm25_top_k=cfg.bm25_top_k,
+        dense_top_k=cfg.dense_top_k,
+        rrf_k=cfg.rrf_k,
+    )
+
+
+def _build_reranker(cfg):
+    """Build CrossEncoderReranker if a reranker model is configured, else None.
+
+    Args:
+        cfg: RerankerCfg. model=None means reranking is disabled.
+
+    Returns:
+        CrossEncoderReranker when cfg.model is set, else None.
+    """
+    if cfg.model is None:
+        return None
+    from src.retrieval import CrossEncoderReranker
+
+    return CrossEncoderReranker()
+
+
+def _build_rewriter(cfg, llm):
+    """Build QueryRewriter if a rewriter model is configured, else None.
+
+    Args:
+        cfg: QueryRewriterCfg. model=None disables query expansion.
+        llm: LLM handler (same object as the pipeline answer LLM). QueryRewriter
+             will call llm.generate_with_usage() to produce expansions.
+
+    Returns:
+        QueryRewriter when cfg.model is set, else None.
+    """
+    if cfg.model is None:
+        return None
+    from src.retrieval import QueryRewriter
+
+    return QueryRewriter(model=cfg.model, max_expansions=cfg.max_expansions, llm=llm)
+
+
+def _build_refusal(cfg):
+    """Build RefusalHandler if enabled, else None.
+
+    Args:
+        cfg: RefusalHandlerCfg. enabled=False means the gate is disabled.
+
+    Returns:
+        RefusalHandler when cfg.enabled, else None.
+    """
+    if not cfg.enabled:
+        return None
+    from src.retrieval import RefusalHandler
+
+    return RefusalHandler(
+        enabled=True,
+        similarity_threshold=cfg.similarity_threshold,
+        no_answer_text=cfg.no_answer_text,
+    )

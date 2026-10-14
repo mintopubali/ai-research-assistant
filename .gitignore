@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+CLAUDE.md
+CLAUDE_INSTRUCTIONS.md
+e2e_screenshots/
+books/
+.worktrees/
+data/rag.db
+data/chroma/
+
+# Eval harness run outputs
+eval_runs/

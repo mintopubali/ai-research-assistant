@@ -1,0 +1,170 @@
+import { useEffect, useRef, useState } from "react";
+import { Brain, ChevronDown, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface ThinkingPanelProps {
+  /** Programmatic status lines emitted during retrieval. */
+  statusLog?: string[];
+  /** Accumulated reasoning tokens from the LLM chain-of-thought pass. */
+  reasoning?: string;
+  /** Seconds the CoT reasoning pass took. Undefined while reasoning is
+   *  still streaming (header shows shimmering "Thinking"). Once set, the
+   *  header switches to "Thought for N.Ns". */
+  thinkingSeconds?: number;
+  /** True once the whole stream is complete. Drives the auto-collapse —
+   *  the panel stays OPEN through the full stream so the user can watch
+   *  reasoning + answer simultaneously, then collapses once done. */
+  streamDone?: boolean;
+}
+
+/**
+ * ChatGPT-style collapsible "Thinking" panel.
+ *
+ * Lifecycle:
+ *   1. Reasoning streaming    (thinkingSeconds undefined)
+ *      → panel open, shimmering "Thinking" header with brain icon, status
+ *        bullets + italic reasoning text accumulate live.
+ *   2. Answer streaming       (thinkingSeconds set, streamDone false)
+ *      → header switches to "Thought for N.Ns" (no shimmer), panel STAYS
+ *        open so the full reasoning trace remains visible next to the
+ *        streaming answer bubble.
+ *   3. Done                   (streamDone true)
+ *      → auto-collapses. User can still click to re-open and inspect.
+ *
+ * PATTERN: The panel owns only the open/closed UI state. Everything else
+ *          (status log, reasoning text, timing signals) streams in via
+ *          props — re-renders happen naturally as parent state updates
+ *          token-by-token.
+ */
+export function ThinkingPanel({
+  statusLog,
+  reasoning,
+  thinkingSeconds,
+  streamDone,
+}: ThinkingPanelProps) {
+  const reasoningActive = thinkingSeconds === undefined;
+  const [open, setOpen] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // WHY rootRef: Needed so the outside-click listener can distinguish
+  //      "clicked inside the panel (stay open)" from "clicked anywhere
+  //      else (collapse)". A single ref wrapping both the header button
+  //      and the dropdown covers both regions.
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open && contentRef.current) {
+      // While reasoning is still streaming, follow the bottom so the user
+      // sees new tokens arrive. Once complete, reset to the top so
+      // expanding the panel shows the reasoning from the beginning.
+      contentRef.current.scrollTop = reasoningActive
+        ? contentRef.current.scrollHeight
+        : 0;
+    }
+  }, [reasoning, statusLog, open, reasoningActive]);
+
+  // WHY: Collapse the dropdown when the user presses anywhere outside it.
+  //
+  // Capture phase + pointerdown was chosen deliberately:
+  //   - pointerdown covers mouse, touch, and pen in a single event so we
+  //     don't need separate mousedown/touchstart handlers (which also
+  //     risked double-firing on touch-emulating-mouse devices).
+  //   - capture:true fires BEFORE any ancestor or React-synthetic handler
+  //     can stopPropagation, so outside-click always reaches us even if
+  //     the target element (e.g. a button in the answer bubble or in
+  //     another React tree) consumes bubbling events.
+  //
+  // Registered only while `open` is true to avoid listener cost when shut.
+  useEffect(() => {
+    if (!open) return;
+    function handleOutside(event: PointerEvent) {
+      const root = rootRef.current;
+      if (!root) return;
+      if (!root.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handleOutside, true);
+    return () => {
+      document.removeEventListener("pointerdown", handleOutside, true);
+    };
+  }, [open]);
+
+  const hasStatus = (statusLog?.length ?? 0) > 0;
+  const hasReasoning = (reasoning?.length ?? 0) > 0;
+  // Completed historical messages (loaded from DB) carry no trace — don't
+  // render a ghost "Thinking..." panel for them.
+  if (streamDone && !hasStatus && !hasReasoning) return null;
+
+  const headerText = reasoningActive
+    ? "Thinking"
+    : `Thought for ${thinkingSeconds!.toFixed(1)}s`;
+
+  return (
+    <div ref={rootRef} className="relative mb-1">
+      <div className="overflow-hidden rounded-xl border border-[#E5E7EB] bg-[#FAFAFA]">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
+        >
+          <Brain
+            className={cn(
+              "size-3.5 shrink-0",
+              reasoningActive ? "text-[#0d74e7]" : "text-[#6B7280]"
+            )}
+          />
+          <span
+            className={cn(
+              "text-xs font-medium",
+              reasoningActive ? "thinking-shimmer" : "text-[#6B7280]"
+            )}
+          >
+            {headerText}
+          </span>
+          <span className="ml-auto text-[#9CA3AF]">
+            {open ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )}
+          </span>
+        </button>
+      </div>
+
+      {open && (hasStatus || hasReasoning) && (
+        <div
+          ref={contentRef}
+          className="absolute left-0 right-0 top-full z-10 max-h-[12rem] space-y-2 overflow-y-auto rounded-b-xl border border-t-0 border-[#E5E7EB] bg-[#FAFAFA] px-3 py-2 text-xs leading-relaxed text-[#4B5563] shadow-md"
+        >
+          {hasStatus && (
+            <ul className="space-y-1 font-mono text-[11px] text-[#6B7280]">
+              {statusLog!.map((line, i) => {
+                const isLast =
+                  i === statusLog!.length - 1 && reasoningActive && !hasReasoning;
+                return (
+                  <li key={i} className="flex items-start gap-1.5">
+                    <span
+                      className={cn(
+                        "mt-1 size-1 shrink-0 rounded-full",
+                        isLast ? "bg-[#0d74e7]" : "bg-[#D1D5DB]"
+                      )}
+                    />
+                    <span>{line}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {hasReasoning && (
+            <div className="whitespace-pre-wrap italic text-[#374151]">
+              {reasoning}
+              {reasoningActive && (
+                <span className="ml-0.5 inline-block h-3 w-[2px] translate-y-0.5 animate-pulse bg-[#0d74e7]" />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

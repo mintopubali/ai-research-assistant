@@ -1,0 +1,61 @@
+# Production compose — built images, no source mounts
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up --build
+#   docker compose -f docker-compose.prod.yml down
+#
+# Frontend is served via nginx (port 3000) which proxies /api/ to the backend.
+# Data persists in a named Docker volume.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    volumes:
+      - app-data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GLM_API_KEY=${GLM_API_KEY:-}
+      # WHY these two are passed through: ADR 0004's central claim is that an
+      #     eval-validated retrieval chain is promoted "by configuration, not a
+      #     code change", and ADR 0009 made both settings env-read to honour it.
+      #     This file is the deployed surface, so leaving them out kept the
+      #     claim false in the one place it had to be true — a prod operator
+      #     could only switch strategy by editing tracked source. The defaults
+      #     reproduce current behaviour exactly: "dense" is the shipped
+      #     strategy, and an empty rewriter model reads back as None.
+      - RETRIEVER_STRATEGY=${RETRIEVER_STRATEGY:-dense}
+      - QUERY_REWRITER_MODEL=${QUERY_REWRITER_MODEL:-}
+      # SECURITY: unset, src/config.py's allowed_origins() falls back to "*",
+      #           which is the right default for local dev against a Vite
+      #           server on another port and the wrong one for a deployed API.
+      #           nginx serves the frontend from :3000 and proxies /api/, so
+      #           that origin is the only one a browser needs. Override with
+      #           ALLOWED_ORIGINS=https://your.domain when deploying elsewhere.
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  app-data:

@@ -1,0 +1,222 @@
+import { useCallback, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { wsUrl } from "@/api/client";
+import type { ChatMessage, EvaluationScore, SourceInfo, TelemetryPayload, WsMessage } from "@/api/types";
+
+let msgCounter = 0;
+function nextId() {
+  return `msg-${++msgCounter}-${Date.now()}`;
+}
+
+export function useChat() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sources, setSources] = useState<SourceInfo[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const assistantIdRef = useRef<string>("");
+  // WHY: Track when the CoT reasoning pass started so we can report elapsed
+  //      "thought for N sec" once the answer begins — matches ChatGPT's UX.
+  const thinkingStartRef = useRef<number | null>(null);
+  // WHY a dedicated ref flag: Earlier versions detected "first token" by
+  //      inspecting m.content === "" inside the setState updater. Under
+  //      React 19 StrictMode (or any case where the updater is invoked more
+  //      than once for the same logical event) the updater saw a non-empty
+  //      content on the "first" token and silently skipped the stamp. A ref
+  //      guard is immune to updater replay — it flips atomically on the
+  //      first `token` frame the onmessage callback handles.
+  const thinkingStampedRef = useRef<boolean>(false);
+  const qc = useQueryClient();
+
+  const sendMessage = useCallback(
+    (query: string, model: string, topK: number, conversationId?: string) => {
+      const userMsg: ChatMessage = { id: nextId(), role: "user", content: query };
+      const asstId = nextId();
+      assistantIdRef.current = asstId;
+      const asstMsg: ChatMessage = {
+        id: asstId,
+        role: "assistant",
+        content: "",
+        reasoning: "",
+        statusLog: [],
+      };
+      setMessages((prev) => [...prev, userMsg, asstMsg]);
+      setSources([]);
+      setIsStreaming(true);
+      thinkingStartRef.current = performance.now();
+      thinkingStampedRef.current = false;
+
+      wsRef.current?.close();
+      const ws = new WebSocket(wsUrl());
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          query,
+          top_k: topK,
+          model,
+          conversation_id: conversationId ?? null,
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        const data: WsMessage = JSON.parse(event.data);
+        if (data.type === "status") {
+          // PATTERN: Append each status line to the message's statusLog so the
+          //          UI can render a lightweight timeline of what the agent is
+          //          doing (searching, retrieving, analyzing, composing).
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantIdRef.current
+                ? { ...m, statusLog: [...(m.statusLog ?? []), data.content] }
+                : m
+            )
+          );
+        } else if (data.type === "reasoning") {
+          // PATTERN: Accumulate reasoning tokens separately from the final
+          //          answer so the "Thinking" panel can show them without
+          //          interleaving with the answer bubble.
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantIdRef.current
+                ? { ...m, reasoning: (m.reasoning ?? "") + data.content }
+                : m
+            )
+          );
+        } else if (data.type === "token") {
+          // WHY: The first answer token marks the end of the CoT phase —
+          //      record how long thinking took so the UI can display
+          //      "Thought for 3.2s" like ChatGPT's reasoning models.
+          //
+          // PATTERN: We decide "is this the first token?" via a ref flag
+          //          OUTSIDE the React updater, so a strict-mode replay of
+          //          the updater can't skip the stamp.
+          let stampSeconds: number | undefined;
+          if (!thinkingStampedRef.current && thinkingStartRef.current !== null) {
+            thinkingStampedRef.current = true;
+            stampSeconds =
+              (performance.now() - thinkingStartRef.current) / 1000;
+          }
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== assistantIdRef.current) return m;
+              return {
+                ...m,
+                content: m.content + data.content,
+                ...(stampSeconds !== undefined
+                  ? { thinkingSeconds: stampSeconds }
+                  : {}),
+              };
+            })
+          );
+        } else if (data.type === "done") {
+          setSources(data.sources);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantIdRef.current
+                ? { ...m, sources: data.sources, streamDone: true }
+                : m
+            )
+          );
+          setIsStreaming(false);
+          thinkingStartRef.current = null;
+          qc.invalidateQueries({ queryKey: ["conversations"] });
+          // WHY: Don't close the WebSocket here — the backend sends an
+          //      "evaluation" event AFTER "done" once real-time faithfulness
+          //      scoring completes. Closing now would drop that event.
+          //      Instead, set a timeout to close if no evaluation arrives.
+          setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) ws.close();
+          }, 30_000);
+        } else if (data.type === "telemetry") {
+          // WHY: The backend emits a "telemetry" event immediately after "done"
+          //      (before evaluation) with per-request timing and token cost.
+          //      We attach it to the assistant message so the UI can render a
+          //      TelemetryFooter without polling or a separate API call.
+          //
+          // PATTERN: Same setMessages updater as the other event handlers —
+          //          merge the payload into the target message by ID.
+          //
+          // TEST TODO: A React Testing Library test should feed the sequence
+          //   status → reasoning → token → done → telemetry → evaluation
+          //   and assert that the last assistant message has both a non-empty
+          //   `content` string and a `telemetry` object with numeric fields
+          //   (retrieve_ms, generate_ms, prompt_tokens, completion_tokens, cost_usd).
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantIdRef.current
+                ? { ...m, telemetry: data.content as TelemetryPayload }
+                : m
+            )
+          );
+        } else if (data.type === "evaluation") {
+          // WHY: The backend fires a separate WebSocket event after the "done"
+          //      event with real-time faithfulness scores. We attach it to the
+          //      assistant message so the UI can show the inline badge.
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantIdRef.current
+                ? {
+                    ...m,
+                    evaluation: [
+                      ...(m.evaluation ?? []),
+                      data.content,
+                    ],
+                  }
+                : m
+            )
+          );
+          ws.close();
+        } else if (data.type === "error") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantIdRef.current
+                ? { ...m, content: `Error: ${data.content}` }
+                : m
+            )
+          );
+          setIsStreaming(false);
+          thinkingStartRef.current = null;
+          ws.close();
+        }
+      };
+
+      ws.onerror = () => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantIdRef.current
+              ? { ...m, content: "Connection error. Is the backend running?" }
+              : m
+          )
+        );
+        setIsStreaming(false);
+        thinkingStartRef.current = null;
+      };
+    },
+    [qc]
+  );
+
+  const clearChat = useCallback(() => {
+    wsRef.current?.close();
+    setMessages([]);
+    setSources([]);
+    setIsStreaming(false);
+  }, []);
+
+  const loadMessages = useCallback((msgs: ChatMessage[]) => {
+    setMessages(msgs);
+  }, []);
+
+  const updateEvaluation = useCallback(
+    (messageId: string, scores: EvaluationScore[]) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId ? { ...m, evaluation: scores } : m
+        )
+      );
+    },
+    []
+  );
+
+  return { messages, sources, isStreaming, sendMessage, clearChat, loadMessages, updateEvaluation };
+}
+// force reload 1776630168
