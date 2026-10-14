@@ -70,22 +70,29 @@ ANTHROPIC_MODELS = [
     "claude-3-opus-20240229",
 ]
 OLLAMA_DEFAULT_MODELS = ["llama3", "mistral", "gemma", "phi3"]
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+]
 
 # GLM / Zhipu AI — OpenAI-compatible endpoint, overridable via env.
 GLM_DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+# Google AI Studio Gemini — OpenAI-compatible endpoint, overridable via env.
+GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 
 def detect_provider(model: str) -> str:
     """Infer the provider from the model-name prefix.
 
-    GLM (Zhipu AI) exposes an OpenAI-compatible API, so it routes to the
+    GLM and Gemini expose OpenAI-compatible APIs, so they route to the
     OpenAI-compatible adapter with a custom base URL (see the client factory).
 
     Args:
         model: Model name.
 
     Returns:
-        One of ``"openai"``, ``"anthropic"``, ``"glm"``, ``"ollama"``.
+        One of ``"openai"``, ``"anthropic"``, ``"glm"``, ``"gemini"``, ``"ollama"``.
     """
     lower = model.lower()
     if lower.startswith(("gpt", "o1", "o3")):
@@ -94,6 +101,8 @@ def detect_provider(model: str) -> str:
         return "anthropic"
     if lower.startswith("glm"):
         return "glm"
+    if lower.startswith("gemini"):
+        return "gemini"
     return "ollama"
 
 
@@ -120,7 +129,7 @@ def build_adapter(
         A ready-to-use ``ProviderAdapter``.
     """
     provider = detect_provider(model)
-    if provider in ("openai", "glm"):
+    if provider in ("openai", "glm", "gemini"):
         return OpenAICompatibleAdapter(
             model, temperature, max_tokens, _openai_client_factory(provider, api_key)
         )
@@ -136,6 +145,7 @@ API_KEY_ENV = {
     "openai": "OPENAI_API_KEY",
     "glm": "GLM_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
 }
 
 
@@ -171,6 +181,12 @@ def _openai_client_factory(provider: str, api_key: str | None) -> Callable[[], o
             if not key:
                 raise ProviderUnavailableError("GLM_API_KEY not set")
             base_url = os.getenv("GLM_BASE_URL", GLM_DEFAULT_BASE_URL)
+            return _openai_module.OpenAI(api_key=key, base_url=base_url)
+        if provider == "gemini":
+            key = resolve_api_key("gemini", api_key)
+            if not key:
+                raise ProviderUnavailableError("GEMINI_API_KEY not set")
+            base_url = os.getenv("GEMINI_BASE_URL", GEMINI_DEFAULT_BASE_URL)
             return _openai_module.OpenAI(api_key=key, base_url=base_url)
         return _openai_module.OpenAI(api_key=resolve_api_key("openai", api_key))
 

@@ -46,6 +46,9 @@ from .config import (
     DEFAULT_MODEL,
     EVAL_MODEL,
     REASONING_MODEL,
+    REFUSAL_ENABLED,
+    REFUSAL_NO_ANSWER_TEXT,
+    REFUSAL_SIMILARITY_THRESHOLD,
     RERANK_OVER_FETCH_N,
     RETRIEVER_STRATEGY,
     SLIDING_WINDOW_SIZE,
@@ -58,7 +61,7 @@ from .ingestion import DocumentLoader, TextChunker
 from .llm_handler import LLMHandler
 from .models.document import DocumentRecord
 from .query_engine import QueryEngine, StreamResult
-from .retrieval import build_retrieval_plan
+from .retrieval import RefusalHandler, build_retrieval_plan
 from .vector_store import ChromaVectorStore
 
 logger = logging.getLogger(__name__)
@@ -89,6 +92,7 @@ def _source_dict(result: SearchResult) -> dict[str, Any]:
         "score": round(result.score, 4),
         "excerpt": result.content[:300],
         "chunk_index": result.metadata.get("chunk_index"),
+        "page_number": result.metadata.get("page_number"),
     }
 
 
@@ -201,11 +205,17 @@ class RAGBackend:
             rerank_over_fetch_n=RERANK_OVER_FETCH_N,
             llm=self.llm,
         )
+        refusal_gate = RefusalHandler(
+            enabled=REFUSAL_ENABLED,
+            similarity_threshold=REFUSAL_SIMILARITY_THRESHOLD,
+            no_answer_text=REFUSAL_NO_ANSWER_TEXT,
+        )
         self.query_engine = QueryEngine(
             retriever=plan.retriever,
             llm=self.llm,
             reasoning_llm=self.reasoning_llm,
             top_k=plan.top_k,
+            refusal=refusal_gate,
         )
 
         logger.info(
@@ -300,6 +310,11 @@ class RAGBackend:
                     "doc_id": c.doc_id,
                     "filename": c.metadata.get("filename", ""),
                     "chunk_index": c.metadata.get("chunk_index", 0),
+                    **(
+                        {"page_number": c.metadata["page_number"]}
+                        if "page_number" in c.metadata and c.metadata["page_number"] is not None
+                        else {}
+                    ),
                 }
                 for c in chunks
             ],

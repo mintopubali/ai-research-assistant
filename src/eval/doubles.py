@@ -37,6 +37,8 @@ class DummyEvalLLM:
     gets a short placeholder answer.
     """
 
+    model: str = "dummy-model"
+
     def generate(self, prompt: str, system_prompt: str | None = None) -> str:
         """Return canned text shaped to whichever role the prompt implies.
 
@@ -50,6 +52,13 @@ class DummyEvalLLM:
         if "JSON" in (system_prompt or "") or '"score"' in prompt:
             return _JUDGE_RESPONSE
         return "<dummy>"
+
+    def generate_with_usage(
+        self, prompt: str, system_prompt: str | None = None
+    ) -> tuple[str, int, int]:
+        """Return (answer, prompt_tokens, completion_tokens)."""
+        answer = self.generate(prompt, system_prompt=system_prompt)
+        return answer, max(1, len(prompt.split())), max(1, len(answer.split()))
 
 
 @dataclass(frozen=True)

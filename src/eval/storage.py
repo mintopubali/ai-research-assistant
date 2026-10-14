@@ -126,23 +126,23 @@ def save_run(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # metadata.json — Pydantic's model_dump_json handles datetime serialization.
-    (run_dir / "metadata.json").write_text(metadata.model_dump_json(indent=2))
+    (run_dir / "metadata.json").write_text(metadata.model_dump_json(indent=2), encoding="utf-8")
 
     # questions.jsonl — one record per line; empty file for zero results.
-    with (run_dir / "questions.jsonl").open("w") as fh:
+    with (run_dir / "questions.jsonl").open("w", encoding="utf-8") as fh:
         for result in results:
             fh.write(result.model_dump_json() + "\n")
 
     # metrics.json — list of AggregatedMetric dicts; default=str handles any
     # non-JSON-native types (e.g. numpy floats) gracefully.
     metrics_data = [am.model_dump() for am in aggregated]
-    (run_dir / "metrics.json").write_text(json.dumps(metrics_data, indent=2, default=str))
+    (run_dir / "metrics.json").write_text(json.dumps(metrics_data, indent=2, default=str), encoding="utf-8")
 
     # cost.json — plain dict; default=str for safety.
-    (run_dir / "cost.json").write_text(json.dumps(cost, indent=2, default=str))
+    (run_dir / "cost.json").write_text(json.dumps(cost, indent=2, default=str), encoding="utf-8")
 
     # config.yaml — raw text, no parsing needed at write time.
-    (run_dir / "config.yaml").write_text(config_yaml_text)
+    (run_dir / "config.yaml").write_text(config_yaml_text, encoding="utf-8")
 
 
 def load_run(run_id: str, base_dir: Path | None = None) -> dict:
@@ -171,21 +171,21 @@ def load_run(run_id: str, base_dir: Path | None = None) -> dict:
     if not run_dir.exists():
         raise FileNotFoundError(f"Run {run_id} not found at {run_dir}")
 
-    metadata = RunMetadata.model_validate_json((run_dir / "metadata.json").read_text())
+    metadata = RunMetadata.model_validate_json((run_dir / "metadata.json").read_text(encoding="utf-8"))
 
     # JSONL: skip blank lines to handle trailing newlines robustly.
     results = [
         EvalResult.model_validate_json(line)
-        for line in (run_dir / "questions.jsonl").read_text().splitlines()
+        for line in (run_dir / "questions.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
 
     aggregated = [
         AggregatedMetric.model_validate(d)
-        for d in json.loads((run_dir / "metrics.json").read_text())
+        for d in json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))
     ]
 
-    cost = json.loads((run_dir / "cost.json").read_text())
+    cost = json.loads((run_dir / "cost.json").read_text(encoding="utf-8"))
 
     return {
         "metadata": metadata,

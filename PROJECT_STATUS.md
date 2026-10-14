@@ -49,19 +49,19 @@
 
 ## 🗓️ ৩. ৭ দিনের ডিফেন্স স্প্রিন্ট প্ল্যান (Checklist)
 
-- [ ] **Day 1: Environment & Base Setup**
-  - [ ] Python 3.12 venv তৈরি ও `pip install -r requirements.txt` সম্পন্ন করা।
-  - [ ] `.env` ফাইলে `GEMINI_API_KEY` কনফিগার করা।
-  - [ ] `pytest tests/` চালিয়ে বেসলাইন গ্রিন টেস্ট ভেরিফাই করা।
-- [ ] **Day 2: Codebase Core Fixes**
-  - [ ] `src/ingestion/parsers.py`-তে PDF পেজ নম্বর ট্র্যাকিং ইমপ্লিমেন্ট করা।
-  - [ ] `src/ingestion/chunking.py`-তে চাঙ্কের মেটাডেটায় `page_number` যোগ করা।
-  - [ ] `src/backend.py`-এর `_source_dict` ও API মডেলে `page_number` ফিল্ড পাঠানো।
-  - [ ] `src/llm_handler/providers.py`-তে Gemini 2.5 Flash অ্যাডাপ্টার রাউটিং যুক্ত করা।
-  - [ ] `src/backend.py`-এ `RefusalHandler` প্রোডাকশনে যুক্ত করা।
-- [ ] **Day 3: Custom Dataset & Mini Benchmark**
-  - [ ] `eval_data/ml_papers_v1/`-এ ৩টি ক্লাসিক পেপার (Attention, RAG, LoRA) যোগ করা।
-  - [ ] ১০টি গোল্ডেন প্রশ্ন তৈরি করে একটি মিনি-ইভ্যালুয়েশন রান চালানো (Recall@K ও Faithfulness)।
+- [x] **Day 1: Environment & Base Setup**
+  - [x] Python venv তৈরি ও `pip install -r requirements.txt` সম্পন্ন করা (সব ২৪টি ডিপেনডেন্সি ইনস্টলড)।
+  - [x] `.env` ফাইলে `GEMINI_API_KEY` কনফিগার করা।
+  - [x] `pytest tests/` চালিয়ে বেসলাইন গ্রিন টেস্ট ভেরিফাই করা (৫৫৬/৫৫৬ পাস)।
+- [x] **Day 2: Codebase Core Fixes**
+  - [x] `src/ingestion/parsers.py`-তে PDF পেজ নম্বর ট্র্যাকিং ইমপ্লিমেন্ট করা (`meta["pages"]`)।
+  - [x] `src/ingestion/chunking.py`-তে চাঙ্কের মেটাডেটায় `page_number` যোগ করা (ChromaDB সেফ)।
+  - [x] `src/backend.py`-এর `_source_dict` ও API মডেলে `page_number` ফিল্ড পাঠানো এবং ফ্রন্টএন্ড UI-তে ব্যাজ দেখানো।
+  - [x] `src/llm_handler/providers.py`-তে Gemini 2.5 Flash OpenAI-compatible অ্যাডাপ্টার রাউটিং যুক্ত করা।
+  - [x] `src/backend.py`-এ `RefusalHandler` প্রোডাকশনে যুক্ত করা।
+- [x] **Day 3: Custom Dataset & Mini Benchmark**
+  - [x] `eval_data/ml_papers_v1/`-এ ৩টি ক্লাসিক পেপার (Attention, RAG, LoRA) যোগ ও ভেরিফাই করা (৪৬০ চাঙ্ক)।
+  - [x] ১০টি গোল্ডেন প্রশ্ন তৈরি করে একটি মিনি-ইভ্যালুয়েশন রান চালানো (Recall@K ও Faithfulness, ০ টোকেন খরচ)।
 - [ ] **Day 4: Thesis Report / Proposal Draft**
   - [ ] `Architecture.md` এবং ADRs ব্যবহার করে চ্যাপ্টার ১ থেকে ৪ লেখা।
 - [ ] **Day 5: Results & Report Completion**

@@ -62,6 +62,11 @@ export function SourcesPanel({ sources, evaluation }: SourcesPanelProps) {
               <span className="flex-1 truncate">
                 {source.filename ?? "Unknown file"}
               </span>
+              {source.page_number && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-[#4b5563] text-[#9ca3af]">
+                  p. {source.page_number}
+                </Badge>
+              )}
               <Badge variant={scoreColor(source.score)}>
                 {source.score.toFixed(2)}
               </Badge>
@@ -73,6 +78,10 @@ export function SourcesPanel({ sources, evaluation }: SourcesPanelProps) {
               <div className="mt-2 flex gap-3 text-[10px]" style={{ color: "#6B7280" }}>
                 <span>doc: {source.doc_id.slice(0, 8)}</span>
                 <span>chunk: {source.chunk_id.slice(0, 8)}</span>
+                {source.page_number && <span>page: {source.page_number}</span>}
+                {source.chunk_index !== undefined && source.chunk_index !== null && (
+                  <span>index: #{source.chunk_index}</span>
+                )}
               </div>
             </CollapsibleContent>
           </Collapsible>

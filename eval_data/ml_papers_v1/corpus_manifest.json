@@ -1,6 +1,27 @@
 {
   "version": "v1",
   "description": "ML/AI literature corpus for the ml_papers_v1 dev set.",
-  "papers": [],
-  "comment_for_labelers": "Populate `papers` during corpus assembly. Each entry: {\"id\": \"slug\", \"title\": \"...\", \"source_url\": \"...\", \"local_path\": \"books/<file>.pdf\", \"sha256\": \"<hex>\"}."
+  "papers": [
+    {
+      "id": "attention-is-all-you-need",
+      "title": "Attention Is All You Need",
+      "source_url": "https://arxiv.org/abs/1706.03762",
+      "local_path": "eval_data/ml_papers_v1/papers/attention_is_all_you_need.pdf",
+      "sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697"
+    },
+    {
+      "id": "retrieval-augmented-generation",
+      "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+      "source_url": "https://arxiv.org/abs/2005.11401",
+      "local_path": "eval_data/ml_papers_v1/papers/rag_lewis_2020.pdf",
+      "sha256": "23e3249e9a1e75418d82efecab0ea8c4d033b89c93742f63208d47ce01f21233"
+    },
+    {
+      "id": "lora-low-rank-adaptation",
+      "title": "LoRA: Low-Rank Adaptation of Large Language Models",
+      "source_url": "https://arxiv.org/abs/2106.09685",
+      "local_path": "eval_data/ml_papers_v1/papers/lora_hu_2021.pdf",
+      "sha256": "e9a0d3128767db616085dc0f4e6e455e672e89af823e8ed1282793682787395a"
+    }
+  ]
 }

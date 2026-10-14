@@ -47,6 +47,10 @@ class SourceInfo(BaseModel):
     filename: str | None = None
     score: float
     excerpt: str = Field(description="Short excerpt from the source chunk.")
+    chunk_index: int | None = Field(default=None, description="Index of chunk in document.")
+    page_number: int | None = Field(
+        default=None, description="1-based page number where chunk appears."
+    )
 
 
 class QueryResponse(BaseModel):

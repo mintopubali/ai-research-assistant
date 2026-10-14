@@ -96,7 +96,7 @@ def sample_and_freeze(
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w") as f:
+    with output_path.open("w", encoding="utf-8") as f:
         for q in questions:
             f.write(q.model_dump_json() + "\n")
 
@@ -120,7 +120,7 @@ def load_frozen(path: Path = DEFAULT_OUTPUT_PATH) -> list[EvalQuestion]:
             f"Frozen SQuAD set not found at {path}. "
             f"Run `python -m src.eval.datasets.squad_v2` to generate it."
         )
-    with path.open() as f:
+    with path.open(encoding="utf-8") as f:
         return [EvalQuestion.model_validate_json(line) for line in f if line.strip()]
 
 

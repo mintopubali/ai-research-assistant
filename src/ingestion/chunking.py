@@ -75,34 +75,64 @@ class TextChunker:
         Returns:
             List of Chunk objects.
         """
-        if self.strategy == "fixed":
-            raw_chunks = self._fixed_chunk(document.content)
-        elif self.strategy == "recursive":
-            # WHY overlap is applied here instead of inside _recursive_chunk:
-            # The recursive splitter calls itself at multiple depths.  If
-            # overlap were applied at each depth it would cascade — the tail
-            # of a depth-1 chunk (already overlapped) gets overlapped again
-            # at depth 0, tripling text.  Applying once at the top avoids this.
-            raw_chunks = self._recursive_chunk(document.content)
-            raw_chunks = self._apply_word_overlap(raw_chunks)
-        else:  # semantic
-            raw_chunks = self._semantic_chunk(document.content)
-
+        base_meta = {k: v for k, v in document.metadata.items() if k != "pages"}
         chunks: list[Chunk] = []
-        for idx, text in enumerate(raw_chunks):
-            stripped = text.strip()
-            if not stripped or len(stripped) < self.MIN_CHUNK_LENGTH:
-                continue
-            # Filter ToC dot-leader chunks (". . . . . . . . . 42").
-            # WHY: PDF tables of contents extract as dot-filled lines
-            # mixed with section titles.  They carry no semantic value
-            # and pollute retrieval.  Content chunks have < 5% dots;
-            # ToC chunks have > 20% dots — a clean bimodal split.
-            dot_ratio = stripped.count(".") / len(stripped)
-            if dot_ratio > 0.15:
-                continue
-            meta = {**document.metadata, "chunk_index": idx, "chunk_strategy": self.strategy}
-            chunks.append(Chunk(content=stripped, metadata=meta, doc_id=document.doc_id))
+
+        if "pages" in document.metadata and isinstance(document.metadata["pages"], list) and document.metadata["pages"]:
+            chunk_idx = 0
+            for page in document.metadata["pages"]:
+                p_num = page.get("page_number", 1)
+                p_text = page.get("text", "")
+                if self.strategy == "fixed":
+                    raw_chunks = self._fixed_chunk(p_text)
+                elif self.strategy == "recursive":
+                    raw_chunks = self._recursive_chunk(p_text)
+                    raw_chunks = self._apply_word_overlap(raw_chunks)
+                else:  # semantic
+                    raw_chunks = self._semantic_chunk(p_text)
+
+                for text in raw_chunks:
+                    stripped = text.strip()
+                    if not stripped or len(stripped) < self.MIN_CHUNK_LENGTH:
+                        continue
+                    dot_ratio = stripped.count(".") / len(stripped)
+                    if dot_ratio > 0.15:
+                        continue
+                    meta = {
+                        **base_meta,
+                        "chunk_index": chunk_idx,
+                        "page_number": p_num,
+                        "chunk_strategy": self.strategy,
+                    }
+                    chunks.append(Chunk(content=stripped, metadata=meta, doc_id=document.doc_id))
+                    chunk_idx += 1
+        else:
+            if self.strategy == "fixed":
+                raw_chunks = self._fixed_chunk(document.content)
+            elif self.strategy == "recursive":
+                raw_chunks = self._recursive_chunk(document.content)
+                raw_chunks = self._apply_word_overlap(raw_chunks)
+            else:  # semantic
+                raw_chunks = self._semantic_chunk(document.content)
+
+            page_number = document.metadata.get(
+                "page_number", 1 if document.metadata.get("page_count") == 1 else None
+            )
+            for idx, text in enumerate(raw_chunks):
+                stripped = text.strip()
+                if not stripped or len(stripped) < self.MIN_CHUNK_LENGTH:
+                    continue
+                dot_ratio = stripped.count(".") / len(stripped)
+                if dot_ratio > 0.15:
+                    continue
+                meta = {
+                    **base_meta,
+                    "chunk_index": idx,
+                    "chunk_strategy": self.strategy,
+                }
+                if page_number is not None:
+                    meta["page_number"] = page_number
+                chunks.append(Chunk(content=stripped, metadata=meta, doc_id=document.doc_id))
 
         logger.debug(
             "Chunked document %s into %d chunks (strategy=%s)",

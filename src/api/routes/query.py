@@ -79,6 +79,8 @@ async def query(request_body: QueryRequest, backend: BackendDep) -> QueryRespons
             filename=s.get("filename"),
             score=s["score"],
             excerpt=s["excerpt"][:200],
+            chunk_index=s.get("chunk_index"),
+            page_number=s.get("page_number"),
         )
         for s in result.get("sources", [])
     ]

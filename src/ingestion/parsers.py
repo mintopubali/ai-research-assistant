@@ -111,9 +111,21 @@ def parse_pdf(path: Path) -> ParseResult:
         return path.read_text(errors="replace"), {}
 
     reader = pypdf.PdfReader(str(path))
-    text = normalise_pdf_text("\n\n".join(page.extract_text() or "" for page in reader.pages))
+    pages: list[dict[str, Any]] = []
+    page_texts: list[str] = []
+    for idx, page in enumerate(reader.pages):
+        page_raw = page.extract_text() or ""
+        page_norm = normalise_pdf_text(page_raw)
+        if page_norm.strip():
+            pages.append({"page_number": idx + 1, "text": page_norm})
+            page_texts.append(page_norm)
 
-    meta: dict[str, Any] = {"page_count": len(reader.pages)}
+    text = "\n\n".join(page_texts)
+
+    meta: dict[str, Any] = {
+        "page_count": len(reader.pages),
+        "pages": pages,
+    }
     if reader.metadata:
         for key in ("title", "author", "subject"):
             value = getattr(reader.metadata, key, None)

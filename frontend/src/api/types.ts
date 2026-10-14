@@ -4,6 +4,8 @@ export interface SourceInfo {
   filename: string | null;
   score: number;
   excerpt: string;
+  chunk_index?: number | null;
+  page_number?: number | null;
 }
 
 export interface QueryRequest {

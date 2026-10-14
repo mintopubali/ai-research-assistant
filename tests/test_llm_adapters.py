@@ -432,6 +432,7 @@ class TestProviderSelection:
         assert detect_provider("gpt-4") == "openai"
         assert detect_provider("claude-sonnet-4-5") == "anthropic"
         assert detect_provider("glm-5.1") == "glm"
+        assert detect_provider("gemini-2.5-flash") == "gemini"
         assert detect_provider("llama3") == "ollama"
 
     def test_glm_model_selects_openai_compatible_adapter(self) -> None:
@@ -448,5 +449,18 @@ class TestProviderSelection:
         """
         monkeypatch.delenv("GLM_API_KEY", raising=False)
         handler = LLMHandler("glm-5.1")  # api_key=None, so no GLM key available
+
+        assert "[LLM unavailable]" in handler.generate("hi")
+
+    def test_gemini_model_selects_openai_compatible_adapter(self) -> None:
+        adapter = build_adapter(
+            "gemini-2.5-flash", 0.7, 256, api_key="k", ollama_base_url="http://localhost:11434"
+        )
+        assert isinstance(adapter, OpenAICompatibleAdapter)
+
+    def test_gemini_without_key_falls_back_to_dummy(self, monkeypatch) -> None:
+        """A Gemini model with no GEMINI_API_KEY is unconfigured -> dummy fallback."""
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        handler = LLMHandler("gemini-2.5-flash")
 
         assert "[LLM unavailable]" in handler.generate("hi")
