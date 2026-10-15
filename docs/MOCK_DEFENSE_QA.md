@@ -1,5 +1,9 @@
 # 🛡️ Mock Defence Preparation: 7 Examiner Trap Questions & Model Answers
 
+**Candidate**: **Mahadur Jaman Minto** | ID: `CE-180628`  
+**Supervisor**: **Dr. Mostofa Kamal Nasir**, Professor, Department of CSE, MBSTU  
+**Institution**: Mawlana Bhashani Science and Technology University (MBSTU)  
+
 > **Purpose**: This document prepares the candidate for the most rigorous and adversarial technical questions typically asked by external examiners and review boards during a RAG / Applied AI thesis defence.
 
 ---

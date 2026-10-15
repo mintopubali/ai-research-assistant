@@ -54,6 +54,10 @@ MODEL_PRICES: dict[str, ModelPrice] = {
     "gemini-3.1-flash-lite": ModelPrice(prompt_per_1m=0.075, completion_per_1m=0.30),
     "gemini-3.1-flash-lite-preview": ModelPrice(prompt_per_1m=0.075, completion_per_1m=0.30),
     "gemini-2.5-flash": ModelPrice(prompt_per_1m=0.075, completion_per_1m=0.30),
+    # Groq Cloud (Free Tier)
+    "qwen/qwen3.8-27b": ModelPrice(prompt_per_1m=0.05, completion_per_1m=0.10),
+    "openai/gpt-oss-120b": ModelPrice(prompt_per_1m=0.15, completion_per_1m=0.50),
+    "openai/gpt-oss-20b": ModelPrice(prompt_per_1m=0.05, completion_per_1m=0.10),
 }
 
 

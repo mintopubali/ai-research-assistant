@@ -2,20 +2,25 @@
 
 **Title**: Verifiable and Cost-Aware Retrieval-Augmented Generation for Scientific Literature  
 **Subtitle**: An Enterprise Architecture with Hybrid Retrieval, Physical Provenance, and Deterministic Gating  
-**Author / Presenter**: Candidate, M.Sc. in Computer Science  
-**Supervisor / Review Committee**: Defense Board  
+**Author / Presenter**: **Mahadur Jaman Minto** | ID: `CE-180628`  
+**Supervisor**: **Dr. Mostofa Kamal Nasir**, Professor, Department of Computer Science and Engineering  
+**Institution**: Mawlana Bhashani Science and Technology University (MBSTU)  
 **Target Duration**: 15–20 minutes (14 Slides)  
 
 ---
 
 ## Slide 1: Title & Research Overview
 * **Header**: Verifiable & Cost-Aware RAG for Scientific Literature
+* **Academic Credentials**:
+  - **Presented by**: **Mahadur Jaman Minto** (ID: `CE-180628`)
+  - **Supervised by**: **Dr. Mostofa Kamal Nasir**, Professor, Department of Computer Science and Engineering
+  - **Department & Institution**: Department of Computer Science and Engineering, Mawlana Bhashani Science and Technology University (MBSTU)
 * **Bullet Points**:
   - Bridging the gap between frontier LLMs and verifiable academic research.
   - Core Focus: Eliminating hallucinations, enforcing exact page citations, and bounding generation costs.
-  - Implemented System: Full-stack RAG Assistant (FastAPI + React 19 + ChromaDB + SQLite + Gemini 2.5 Flash).
+  - Implemented System: Full-stack RAG Assistant (FastAPI + React 19 + ChromaDB + SQLite + Groq LPU / Gemini).
 * **Speaker Notes**:
-  > "Good morning, respected committee members. Today I am presenting my research on building an enterprise-grade, verifiable, and cost-aware RAG architecture designed specifically for academic literature. We demonstrate how disciplined architectural seams solve the triad of RAG vulnerabilities: hallucinations, lost citations, and unbounded operational costs."
+  > "Respected supervisor Dr. Mostofa Kamal Nasir, honorable defense committee members, and distinguished faculty members, Assalamu Alaikum and good morning. I am Mahadur Jaman Minto (ID: CE-180628). Today, I am honored to present my defense on 'Verifiable and Cost-Aware Retrieval-Augmented Generation for Scientific Literature'. In this research, we tackle the critical vulnerabilities of standard RAG—hallucinations, lost citation provenance, and unbounded inference costs—by introducing an enterprise-grade, verifiable architecture."
 
 ---
 

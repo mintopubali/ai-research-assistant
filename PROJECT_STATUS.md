@@ -1,5 +1,9 @@
 # 🚀 Project Status & Master Defence Handover
 
+**Candidate**: **Mahadur Jaman Minto** | ID: `CE-180628`  
+**Supervisor**: **Dr. Mostofa Kamal Nasir**, Professor, Department of CSE  
+**Institution**: Mawlana Bhashani Science and Technology University (MBSTU)  
+
 > **Document Purpose**: এই ফাইলটি প্রজেক্টের বর্তমান স্ট্যাটাস, অডিট রিপোর্ট এবং ডিফেন্সের সম্পূর্ণ রোডম্যাপ সংরক্ষণ করে। অন্য যেকোনো পিসি বা নতুন সেশনে এই ফাইলটি পড়েই এজেন্ট বা ডেভেলপার সাথে সাথে বুঝতে পারবে প্রজেক্ট কোন ধাপে আছে এবং ঠিক এরপর কী করতে হবে।
 > 
 > **Target Deadline**: আগামী সপ্তাহের ডিফেন্স ও ফাইনাল সাবমিশন।

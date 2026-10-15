@@ -71,30 +71,41 @@ ANTHROPIC_MODELS = [
 ]
 OLLAMA_DEFAULT_MODELS = ["llama3", "mistral", "gemma", "phi3"]
 GEMINI_MODELS = [
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite-preview",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
+]
+GROQ_MODELS = [
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
 ]
 
 # GLM / Zhipu AI — OpenAI-compatible endpoint, overridable via env.
 GLM_DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 # Google AI Studio Gemini — OpenAI-compatible endpoint, overridable via env.
 GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# Groq Cloud — OpenAI-compatible ultra-fast LPU endpoint
+GROQ_DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
 
 
 def detect_provider(model: str) -> str:
     """Infer the provider from the model-name prefix.
 
-    GLM and Gemini expose OpenAI-compatible APIs, so they route to the
+    GLM, Gemini, and Groq expose OpenAI-compatible APIs, so they route to the
     OpenAI-compatible adapter with a custom base URL (see the client factory).
 
     Args:
         model: Model name.
 
     Returns:
-        One of ``"openai"``, ``"anthropic"``, ``"glm"``, ``"gemini"``, ``"ollama"``.
+        One of ``"openai"``, ``"anthropic"``, ``"glm"``, ``"gemini"``, ``"groq"``, ``"ollama"``.
     """
     lower = model.lower()
+    if lower.startswith(("qwen", "groq", "openai/gpt-oss")):
+        return "groq"
     if lower.startswith(("gpt", "o1", "o3")):
         return "openai"
     if lower.startswith("claude"):
@@ -129,7 +140,7 @@ def build_adapter(
         A ready-to-use ``ProviderAdapter``.
     """
     provider = detect_provider(model)
-    if provider in ("openai", "glm", "gemini"):
+    if provider in ("openai", "glm", "gemini", "groq"):
         return OpenAICompatibleAdapter(
             model, temperature, max_tokens, _openai_client_factory(provider, api_key)
         )
@@ -146,6 +157,7 @@ API_KEY_ENV = {
     "glm": "GLM_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "groq": "GROQ_API_KEY",
 }
 
 
@@ -153,7 +165,7 @@ def resolve_api_key(provider: str, api_key: str | None = None) -> str | None:
     """Return the API key for a provider: explicit argument, else environment.
 
     Args:
-        provider: One of ``openai``, ``glm``, ``anthropic``.
+        provider: One of ``openai``, ``glm``, ``anthropic``, ``gemini``, ``groq``.
         api_key: An explicitly supplied key, which always wins.
 
     Returns:
@@ -166,9 +178,9 @@ def resolve_api_key(provider: str, api_key: str | None = None) -> str | None:
 
 
 def _openai_client_factory(provider: str, api_key: str | None) -> Callable[[], object]:
-    """Build a factory for an OpenAI-SDK client, redirected to GLM when needed.
+    """Build a factory for an OpenAI-SDK client, redirected to GLM/Gemini/Groq when needed.
 
-    Missing SDK -> ProviderUnavailableError (dummy fallback). Missing GLM key ->
+    Missing SDK -> ProviderUnavailableError (dummy fallback). Missing key ->
     ProviderUnavailableError. A missing OpenAI key is left to the SDK, which
     raises its own error that propagates (unchanged behaviour).
     """
@@ -187,6 +199,12 @@ def _openai_client_factory(provider: str, api_key: str | None) -> Callable[[], o
             if not key:
                 raise ProviderUnavailableError("GEMINI_API_KEY not set")
             base_url = os.getenv("GEMINI_BASE_URL", GEMINI_DEFAULT_BASE_URL)
+            return _openai_module.OpenAI(api_key=key, base_url=base_url)
+        if provider == "groq":
+            key = resolve_api_key("groq", api_key)
+            if not key:
+                raise ProviderUnavailableError("GROQ_API_KEY not set")
+            base_url = os.getenv("GROQ_BASE_URL", GROQ_DEFAULT_BASE_URL)
             return _openai_module.OpenAI(api_key=key, base_url=base_url)
         return _openai_module.OpenAI(api_key=resolve_api_key("openai", api_key))
 

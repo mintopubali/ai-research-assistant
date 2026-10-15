@@ -1,6 +1,10 @@
 # Defence Roadmap & Stage Tracker
 
-> Note: এই ডকুমেন্টের মূল বিস্তারিত সংস্করণ রুট ডিরেক্টরিতে [`PROJECT_STATUS.md`](file:///Users/mgtapp/dotnet/rag-document-qa/PROJECT_STATUS.md)-এ সংরক্ষিত আছে।
+**Candidate**: **Mahadur Jaman Minto** | ID: `CE-180628`  
+**Supervisor**: **Dr. Mostofa Kamal Nasir**, Professor, Department of CSE  
+**Institution**: Mawlana Bhashani Science and Technology University (MBSTU)  
+
+> Note: এই ডকুমেন্টের মূল বিস্তারিত সংস্করণ রুট ডিরেক্টরিতে [`PROJECT_STATUS.md`](file:///d:/work/dotnet/ai-research-assistant/PROJECT_STATUS.md)-এ সংরক্ষিত আছে।
 
 ## পরবর্তী সেশনে কাজ শুরুর কুইক নির্দেশিকা:
 

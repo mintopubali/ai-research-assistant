@@ -2,6 +2,19 @@
 
 **An Enterprise-Grade Architecture with Hybrid Retrieval, Physical Provenance, and Deterministic Gating**
 
+<br />
+
+| **Academic Credential** | **Details** |
+|:---|:---|
+| **Author / Candidate** | **Mahadur Jaman Minto** |
+| **Student ID** | `CE-180628` |
+| **Supervisor** | **Dr. Mostofa Kamal Nasir**<br />Professor, Department of Computer Science and Engineering |
+| **Department** | Department of Computer Science and Engineering (CSE) |
+| **Institution** | Mawlana Bhashani Science and Technology University (MBSTU), Santosh, Tangail-1902, Bangladesh |
+| **Degree** | Bachelor / Master of Science in Computer Science and Engineering |
+
+<br />
+
 ---
 
 ## Abstract

@@ -1,5 +1,9 @@
 # 🏛️ System Architecture: AI Research Assistant RAG Pipeline
 
+**Author / Developer**: **Mahadur Jaman Minto** | ID: `CE-180628`  
+**Academic Supervisor**: **Dr. Mostofa Kamal Nasir**, Professor, Department of CSE  
+**Institution**: Mawlana Bhashani Science and Technology University (MBSTU)  
+
 > **Document Version**: 2.0 (Post-Phase 2 Hardening)  
 > **Status**: Approved & Implemented in Production  
 > **Architecture Pattern**: Hexagonal Architecture (Ports & Adapters) with Functional Composition  
@@ -157,33 +161,50 @@ flowchart LR
 
 ---
 
-## 5. Multi-Provider LLM Seam & Gemini 2.5 Flash Integration
+## 5. Multi-Provider LLM Seam & Cloud Inference Topology
 
-The LLM abstraction (`LLMHandler`) exposes standard `generate_messages()` and `stream_messages()` interfaces. 
+The LLM abstraction (`LLMHandler`) exposes unified `generate_messages()` and `stream_messages()` interfaces. Any LLM provider exposing an OpenAI-compatible endpoint can be swapped with zero core logic changes.
 
 ```mermaid
 flowchart TD
     A[LLMHandler Request] --> B{detect_provider(model)}
-    B -- "gpt-*, o1, o3" --> C[OpenAIAdapter]
-    B -- "claude-*" --> D[AnthropicAdapter]
-    B -- "gemini-*" --> E[OpenAICompatibleAdapter]
-    B -- "ollama / llama*" --> F[OllamaAdapter]
+    B -- "qwen/*, groq/*, openai/gpt-oss-*" --> C[Groq LPU Adapter]
+    B -- "gemini-*" --> D[Google Gemini Adapter]
+    B -- "gpt-*, o1, o3" --> E[OpenAI Adapter]
+    B -- "claude-*" --> F[Anthropic Adapter]
+    B -- "ollama / llama*" --> G[Ollama Local Adapter]
     
-    E --> G["Base URL: https://generativelanguage.googleapis.com/v1beta/openai/"]
-    G --> H["API Key: GEMINI_API_KEY (Google AI Studio)"]
+    C --> H["Groq Base URL: https://api.groq.com/openai/v1\n(Key: GROQ_API_KEY | 800+ tok/s)"]
+    D --> I["Gemini Base URL: https://generativelanguage.googleapis.com/v1beta/openai/\n(Key: GEMINI_API_KEY)"]
     
-    C -. "Fallback on Failure" .-> I[DummyAdapter: Graceful UI Notice]
-    D -. "Fallback on Failure" .-> I
-    E -. "Fallback on Failure" .-> I
-    F -. "Fallback on Failure" .-> I
+    C -. "Fallback on Failure" .-> J[DummyAdapter: Graceful UI Notice]
+    D -. "Fallback on Failure" .-> J
+    E -. "Fallback on Failure" .-> J
+    F -. "Fallback on Failure" .-> J
+    G -. "Fallback on Failure" .-> J
 ```
+
+### Supported Active Providers:
+1. **Groq Cloud (Default)**: Hardware LPU inference delivering 500–800+ tokens/sec. Production models: `qwen/qwen3.8-27b` and `openai/gpt-oss-120b`. Generous free tier with no 20-RPD bottleneck.
+2. **Google AI Studio**: Cloud inference supporting `gemini-3.1-flash-lite` and `gemini-3.1-flash-lite-preview`.
+3. **OpenAI**: Native support for `gpt-5-mini`, `gpt-5.4-nano`, `gpt-4.1-mini`.
+4. **Local Ollama**: Fully offline local inference using `llama3` with zero internet dependency.
 
 ---
 
-## 6. Real-Time Telemetry & Cost Accounting
+## 6. Embedded Zero-Ops Persistence Architecture
+
+To eliminate external service dependencies and network latency, the storage tier runs strictly in-process on the local host filesystem:
+- **Vector Storage (`data/chroma/`)**: `chromadb.PersistentClient` storing 384-dimensional dense vectors with HNSW cosine index.
+- **Relational Storage (`data/rag.db`)**: Embedded SQLite database managed through SQLModel (SQLAlchemy 2.0 async-compatible ORM). Stores conversations, messages, sources, and offline evaluation runs.
+- **Data Persistence**: Both databases survive container or application restarts by persisting directly in the root `data/` volume.
+
+---
+
+## 7. Real-Time Telemetry & Cost Accounting
 
 Every query records granular per-stage latency and token consumption into a structured `StageTelemetry` schema:
 - `retrieve_ms`: Wall-clock retrieval time (ms).
 - `generate_ms`: Generation time (ms).
 - `prompt_tokens` & `completion_tokens`: Provider-reported token counts.
-- `cost_usd`: Dynamically computed using the internal pricing ledger based on published per-million token rates.
+- `cost_usd`: Dynamically computed using the internal pricing table (`src/telemetry/pricing.py`) based on published per-million token rates for Groq, Gemini, and OpenAI.

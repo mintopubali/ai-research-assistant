@@ -167,15 +167,15 @@ CHROMA_COLLECTION: str = "documents"
 
 # WHY: A named default model constant lets the UI and API share the same
 #      fallback without hard-coding the string in multiple places.
-DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", "").strip() or "gemini-3.1-flash-lite"
+DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", "").strip() or "qwen/qwen3.8-27b"
 
 # WHY a dedicated reasoning model: The chain-of-thought pass produces short,
 #      throwaway scaffolding (3-5 sentences).
-REASONING_MODEL: str = os.getenv("REASONING_MODEL", "").strip() or "gemini-3.1-flash-lite"
+REASONING_MODEL: str = os.getenv("REASONING_MODEL", "").strip() or "qwen/qwen3.8-27b"
 
 # WHY a dedicated evaluation model: Using a calibrated model for real-time
 #      faithfulness checks while strong enough to catch factual errors.
-EVAL_MODEL: str = os.getenv("EVAL_MODEL", "").strip() or "gemini-3.1-flash-lite"
+EVAL_MODEL: str = os.getenv("EVAL_MODEL", "").strip() or "qwen/qwen3.8-27b"
 
 # WHY: Sliding-window chat history keeps the LLM context window manageable.
 #      5 turns (10 messages) is a practical balance: enough context for

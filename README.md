@@ -6,12 +6,11 @@
 
 <br /><br />
 
-# RAG Document Q&A
+# AI Research Assistant: Production RAG System
 
-**Upload documents. Ask questions. Get cited answers.**
+**Upload research papers. Ask questions. Get cited, page-grounded answers with real-time CoT streaming.**
 
-A production-grade Retrieval-Augmented Generation system with real-time streaming,
-multi-provider LLM support, and built-in answer evaluation.
+A production-grade Retrieval-Augmented Generation (RAG) system with hybrid retrieval (BM25 + Dense vector search with RRF), cross-encoder neural reranking, multi-provider LLM inference (Groq, Gemini, OpenAI, Claude, Ollama), refusal gating, and built-in answer evaluation.
 
 <br />
 
@@ -22,13 +21,10 @@ multi-provider LLM support, and built-in answer evaluation.
 [![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev)
 [![Tailwind](https://img.shields.io/badge/Tailwind-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![ChromaDB](https://img.shields.io/badge/ChromaDB-1.0-FF6F61?style=flat-square)](https://www.trychroma.com)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![Groq](https://img.shields.io/badge/Groq-LPU_Inference-F05A28?style=flat-square)](https://groq.com)
 [![License](https://img.shields.io/badge/License-MIT-2fbb4f?style=flat-square)](LICENSE)
 
 <br />
-
-<!-- Replace with actual screenshots when available -->
-<!-- <img src="docs/images/chat.png" alt="Chat interface" width="820" /> -->
 
 </div>
 
@@ -36,13 +32,15 @@ multi-provider LLM support, and built-in answer evaluation.
 
 ## Highlights
 
-- **Full RAG Pipeline** — document ingestion, chunking, embedding, retrieval, and generation in one system
-- **Real-Time Streaming** — token-by-token answer delivery over WebSocket with chain-of-thought reasoning
-- **Multi-Provider LLM** — OpenAI, Anthropic, and Ollama with automatic provider detection
-- **Answer Evaluation** — RAGAS-inspired faithfulness, relevancy, and precision scoring (LLM-as-judge)
-- **7 File Formats** — PDF, DOCX, TXT, Markdown, HTML, CSV, JSON
-- **Persistent Storage** — ChromaDB vector store + SQLite for conversations, messages, and sources
-- **No API Keys Required** — runs fully standalone with local embeddings and dummy LLM fallback
+- **Hybrid Retrieval & RRF Fusion** — Dense vector semantic search (`all-MiniLM-L6-v2`) fused with sparse BM25 keyword search via Reciprocal Rank Fusion ($k=60$) to eliminate vocabulary mismatch.
+- **Neural Cross-Encoder Reranking** — Precision reranking via `ms-marco-MiniLM-L-6-v2` over-fetches top candidate chunks and calculates cross-attention for high contextual relevance.
+- **Ultra-Fast & Multi-Provider LLMs** — Native support for **Groq Cloud** (800+ tok/s, no quota bottleneck), **Google AI Studio Gemini**, **OpenAI**, **Anthropic**, and local **Ollama** with automated routing.
+- **Page-Level Source Attribution** — Exact PDF page number tracking (`P. X` badge) propagated from ingestion to citation cards with relevance scores and chunk inspectors.
+- **Refusal Gating (Anti-Hallucination)** — Configurable similarity threshold gate (`REFUSAL_ENABLED`, default `0.25`) that honestly declines queries when retrieved context is insufficient.
+- **Real-Time Streaming & CoT** — Token-by-token WebSocket streaming with collapsible Chain-of-Thought ("Thinking") reasoning phase.
+- **Embedded Zero-Ops Storage** — Zero external DB containers required; in-process **ChromaDB PersistentClient** for vectors and **SQLite + SQLModel** for conversations and messages.
+- **RAGAS-Inspired Evaluation & Offline Benchmark** — LLM-as-judge faithfulness scoring alongside an offline evaluation harness tested against classic ML papers.
+- **Comprehensive Academic Defense Suite** — Full thesis draft, 14-slide master defense deck with verbatim speaker notes, and mock defense examiner trap answers.
 
 ---
 
@@ -52,34 +50,47 @@ multi-provider LLM support, and built-in answer evaluation.
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          INDEXING PIPELINE                              │
 │                                                                         │
-│   📄 Document  →  Loader  →  Chunker  →  ChromaDB Embedder  →  HNSW   │
-│      (7 formats)    │       (recursive)   (all-MiniLM-L6-v2)   Index   │
-│                     │                                                   │
-│                     └──→  SQLite (metadata, doc records)                │
+│   📄 PDF / Paper  →  Parser & Page Tracker  →  Recursive Chunker       │
+│      (7 formats)             │                   (512 char, 64 ovlp)    │
+│                              ▼                            │             │
+│                      SQLite Metadata                      ▼             │
+│                      (data/rag.db)             ChromaDB Vector Store    │
+│                                                (data/chroma/)           │
 └─────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          QUERY PIPELINE                                 │
 │                                                                         │
-│   ❓ Question  →  Embed  →  Cosine Search  →  Top-K Chunks             │
-│                                                    │                    │
-│                              ┌─────────────────────┘                    │
-│                              ▼                                          │
-│                   ┌─── Reasoning (CoT) ───┐                             │
-│                   │   gpt-4.1-nano        │                             │
-│                   └───────────┬───────────┘                             │
-│                               ▼                                         │
-│                   ┌─── Generation ────────┐                             │
-│                   │   user-selected model │──→  💬 Streaming Answer     │
-│                   └───────────┬───────────┘     with Source Citations   │
-│                               ▼                                         │
-│                   ┌─── Evaluation ────────┐                             │
-│                   │   Faithfulness check  │──→  📊 Quality Score        │
-│                   └───────────────────────┘                             │
+│   ❓ User Question                                                      │
+│          │                                                              │
+│          ├──→ Dense Vector Search (Top-20) ──┐                          │
+│          │                                   ├──→ RRF Fusion (k=60)     │
+│          └──→ BM25 Keyword Search (Top-20)  ─┘          │               │
+│                                                         ▼               │
+│                                              Neural Cross-Encoder       │
+│                                              Reranker (Top-5)           │
+│                                                         │               │
+│                                                         ▼               │
+│                                              Refusal Gate Check         │
+│                                              (Threshold >= 0.25)        │
+│                                                    │          │         │
+│                                         [Sufficient]      [Below Cutoff]│
+│                                              │                │         │
+│                                              ▼                ▼         │
+│                                   ┌─ Reasoning (CoT) ─┐   Honest        │
+│                                   │  Groq / Gemini    │   Refusal       │
+│                                   └─────────┬─────────┘   Response      │
+│                                             ▼                           │
+│                                   ┌─ Generation ──────┐                 │
+│                                   │ Qwen 3.8 / Gemini │                 │
+│                                   └─────────┬─────────┘                 │
+│                                             │                           │
+│                                             ▼                           │
+│                         💬 Real-Time Streaming Answer                   │
+│                         🏷️ Page-Numbered Citations (P. X)              │
+│                         📊 Real-Time Faithfulness Score                 │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
-
-The **RAGBackend** facade orchestrates all components and persists state via `app.state`, so documents indexed through `/upload` are immediately searchable via `/chat`.
 
 ---
 
@@ -88,357 +99,194 @@ The **RAGBackend** facade orchestrates all components and persists state via `ap
 <table>
 <tr>
 <td width="140"><b>🖥️ Frontend</b></td>
-<td>React 19 · TypeScript · Vite 7 · Tailwind CSS v4 · shadcn/ui · TanStack Query</td>
+<td>React 19 · TypeScript 5.9 · Vite 7 · Tailwind CSS v4 · shadcn/ui · TanStack Query · Lucide Icons</td>
 </tr>
 <tr>
 <td><b>⚙️ Backend</b></td>
-<td>Python · FastAPI · Uvicorn · Pydantic v2 · SQLModel</td>
+<td>Python 3.12+ · FastAPI · Uvicorn · SQLModel · Pydantic v2</td>
 </tr>
 <tr>
 <td><b>🔍 Retrieval</b></td>
-<td>ChromaDB (HNSW index) · all-MiniLM-L6-v2 embeddings (384-dim) · Cosine similarity</td>
+<td>ChromaDB (HNSW PersistentClient) · all-MiniLM-L6-v2 (384-dim) · BM25 · Reciprocal Rank Fusion · Cross-Encoder</td>
 </tr>
 <tr>
-<td><b>🤖 LLM</b></td>
-<td>OpenAI (GPT-5, GPT-4.1) · Anthropic (Claude) · Ollama (Llama 3, Mistral, local models)</td>
+<td><b>🤖 LLM Providers</b></td>
+<td>
+  <b>Groq Cloud</b> (Qwen 3.8 27B, GPT-OSS 120B — 800+ tok/s)<br />
+  <b>Google AI Studio</b> (Gemini 3.1 Flash Lite, Gemini 3.1 Preview)<br />
+  <b>OpenAI</b> (GPT-5, GPT-4.1) · <b>Anthropic</b> (Claude) · <b>Ollama</b> (Llama 3)
+</td>
 </tr>
 <tr>
 <td><b>📄 Parsing</b></td>
-<td>pypdf · python-docx · BeautifulSoup4</td>
+<td>pypdf (page tracking) · python-docx · BeautifulSoup4</td>
 </tr>
 <tr>
 <td><b>💾 Storage</b></td>
-<td>SQLite (conversations, messages, evaluations) · ChromaDB (vector persistence)</td>
+<td>SQLite (embedded at <code>data/rag.db</code>) · ChromaDB (embedded at <code>data/chroma/</code>)</td>
 </tr>
 <tr>
-<td><b>📦 Deploy</b></td>
-<td>Docker Compose · Multi-stage builds</td>
+<td><b>📊 Evaluation</b></td>
+<td>LLM-as-judge faithfulness · Context recall · Precision · Arize Phoenix (OTel tracing)</td>
 </tr>
 </table>
 
 ---
 
+## Defense & Research Documentation
+
+For thesis presentation, viva preparation, and technical architecture review, refer to the dedicated documents in `docs/`:
+
+- 📑 [**Thesis Report Draft**](docs/THESIS_REPORT_DRAFT.md) — 6-chapter comprehensive academic draft with IEEE-formatted citations and mathematical proofs.
+- 🖼️ [**Master Defense Slides**](docs/DEFENSE_SLIDES.md) — 14-slide defense deck with verbatim speaker notes, slide visuals, and timing guidance.
+- 🛡️ [**Examiner Trap Q&A**](docs/MOCK_DEFENSE_QA.md) — Defenses and mathematical answers for the top 7 hardest examiner questions.
+- 📐 [**Technical Architecture Specification**](docs/Architecture.md) — End-to-end dataflow, sequence diagrams, and design decisions.
+- 🗺️ [**Defense Roadmap**](docs/DEFENSE_ROADMAP.md) — 7-day execution checklist for project delivery.
+
+---
+
 ## Features
 
-### Document Ingestion
-- **Drag-and-drop upload** with instant auto-indexing — no manual "upload" button needed
-- **7 supported formats**: PDF, DOCX, TXT, Markdown, HTML, CSV, JSON (50 MB max)
-- **3 chunking strategies**: fixed-size, recursive (paragraph-aware), semantic (sentence-level)
-- **Smart filtering**: strips chunks under 20 chars or with >15% dots (table-of-contents noise)
-- **Idempotent upsert**: re-uploading the same document overwrites existing chunks
+### 1. Document Ingestion with Page-Number Grounding
+- **Drag-and-drop auto-indexing** for PDF, DOCX, TXT, Markdown, HTML, CSV, JSON.
+- **Page-Level Chunk Metadata**: PDF pages are individually tracked during parsing and retained across chunking so answers cite specific pages (e.g. `Attention Is All You Need.pdf (P. 3)`).
+- **Smart Filtering**: Rejects table-of-contents dots and low-entropy snippets.
 
-### Streaming Chat
-- **WebSocket protocol** delivers tokens in real-time as they generate
-- **Two-phase generation**: lightweight reasoning pass (gpt-4.1-nano) followed by full answer
-- **Chain-of-thought panel**: collapsible display of the model's reasoning process with timing
-- **Markdown rendering**: GitHub Flavored Markdown with syntax-highlighted code blocks
-- **Conversation history**: sliding window context (5 turns) for follow-up questions
+### 2. High-Speed Streaming Chat with CoT
+- **WebSocket connection** (`/api/chat`) with sub-second token latency.
+- **Thinking Process**: Collapsible Chain-of-Thought (CoT) panel showing intermediate reasoning before final answer delivery.
+- **Markdown & Code Highlighting**: Syntax-highlighted code blocks, formulas, and formatted tables.
 
-### Source Attribution
-- **Resizable sources panel** with per-chunk relevance scores
-- **Collapsible source cards** showing document name, excerpt, and chunk/doc IDs
-- **Score-based ordering**: most relevant chunks surface first
-- **Full traceability**: every answer links back to specific document chunks
+### 3. Multi-Provider Flexibility (Zero Token Bottleneck)
+- **Groq LPU Support**: Up to 800+ tokens/second with generous free daily limits using `qwen/qwen3.8-27b` and `openai/gpt-oss-120b`.
+- **Google AI Studio Support**: Direct support for `gemini-3.1-flash-lite` and preview models.
+- **Local Fallback**: Full compatibility with local Ollama (`llama3`) and local embeddings.
 
-### Conversation Management
-- **Persistent conversations** stored in SQLite with full message history
-- **Pin, rename, search, export** (Markdown), and share (read-only public link)
-- **Auto-generated titles** from first user message
-- **Delete confirmation dialog** to prevent accidental loss
+### 4. Anti-Hallucination Refusal Gate
+- When the maximum retrieval similarity falls below the threshold (`REFUSAL_SIMILARITY_THRESHOLD=0.25`), the system short-circuits LLM generation and honestly states:
+  > *"I don't have enough information to answer that based on the provided documents."*
 
-### Answer Evaluation (RAGAS-Inspired)
-- **Faithfulness**: decomposes answer into atomic claims, validates each against retrieved context
-- **Answer Relevancy**: judges whether the answer addresses the question
-- **Context Precision**: assesses which retrieved chunks were actually useful
-- **LLM-as-judge**: separate evaluation model (gpt-4.1-mini) to avoid self-evaluation bias
-- **Real-time**: faithfulness runs automatically after each answer; full evaluation on-demand
-
-### Document Browser
-- **Collection statistics**: document count, total chunks, storage size, file type breakdown
-- **Sortable table** with filename, chunk count, upload date, and file size
-- **Chunk inspector**: view individual chunks to verify chunking quality
+### 5. Automated Answer Quality Evaluation
+- Real-time **Faithfulness** scoring per message using atomic claim decomposition.
+- On-demand **Answer Relevancy** and **Context Precision** scoring.
+- Offline evaluation suite with golden question datasets and baseline comparison metrics.
 
 ---
 
 ## Quick Start
 
-### Docker (recommended)
+### 1. Prerequisites
+- **Python 3.12+**
+- **Node.js 20+** and **npm**
+
+### 2. Clone and Setup Environment
 
 ```bash
-git clone https://github.com/mohamed-elkholy95/rag-document-qa.git
-cd rag-document-qa
-docker compose up --build
-```
+git clone https://github.com/mintopubali/ai-research-assistant.git
+cd ai-research-assistant
 
-| Service | URL |
-|---------|-----|
-| Frontend | [localhost:3000](http://localhost:3000) |
-| API | [localhost:8001](http://localhost:8001) |
-| Swagger Docs | [localhost:8001/docs](http://localhost:8001/docs) |
+# Create Python virtual environment
+python -m venv .venv
 
-### Running with traces (Phoenix)
+# Activate on Windows:
+.\.venv\Scripts\activate
+# Activate on Linux/macOS:
+# source .venv/bin/activate
 
-```bash
-docker compose --profile observability up
-```
-
-Phoenix UI is available at http://localhost:6006. The FastAPI backend
-will export per-stage spans (`rag.retrieve`, `rag.generate`) with token
-counts and cost as span attributes. If Phoenix isn't running, the app
-works normally — span export silently fails.
-
-### Manual Setup
-
-```bash
-# Backend
-python -m venv .venv && source .venv/bin/activate
+# Install backend dependencies
 pip install -r requirements.txt
-python -m src.api.main                    # API on :8001
-
-# Frontend (separate terminal)
-cd frontend && npm install
-npm run dev                               # Vite on :5173
 ```
 
-### Connect an LLM (optional)
+### 3. Configure API Keys in `.env`
 
-The system runs without any API keys — retrieval works with local ChromaDB embeddings,
-and the LLM falls back to dummy responses. To enable real answers:
+Copy or edit `.env` in the root folder:
 
+```ini
+# Recommended: Groq Cloud (Free, ultra-fast 800 tok/s, no tight token quota)
+GROQ_API_KEY=gsk_your_groq_api_key
+
+# Optional: Google AI Studio Gemini
+GEMINI_API_KEY=your_gemini_api_key
+
+# Default Model Selection
+DEFAULT_MODEL=qwen/qwen3.8-27b
+REASONING_MODEL=qwen/qwen3.8-27b
+EVAL_MODEL=qwen/qwen3.8-27b
+
+# Retrieval Strategy (dense | hybrid | reranked | multi_query)
+RETRIEVER_STRATEGY=dense
+```
+
+### 4. Run Backend & Frontend
+
+**Terminal 1 — Backend API:**
 ```bash
-# Pick one or more:
-export OPENAI_API_KEY="sk-..."            # GPT-5, GPT-4.1, o-series
-export ANTHROPIC_API_KEY="sk-ant-..."     # Claude Opus, Sonnet, Haiku
-
-# Or run a local model with Ollama (no key needed):
-ollama pull llama3
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8001
 ```
+
+**Terminal 2 — Frontend UI:**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+| Service | URL | Description |
+|---|---|---|
+| **Frontend UI** | [http://localhost:3000](http://localhost:3000) | Full Chat & Upload UI |
+| **Backend API** | [http://localhost:8001](http://localhost:8001) | FastAPI Server |
+| **Interactive Docs** | [http://localhost:8001/docs](http://localhost:8001/docs) | Swagger OpenAPI UI |
+| **Health Check** | [http://localhost:8001/health](http://localhost:8001/health) | API Status (`{"status":"healthy"}`) |
 
 ---
 
-## API Reference
-
-### Upload & Documents
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/upload` | Upload and index a single document |
-| `POST` | `/api/upload/batch` | Batch upload multiple files |
-| `GET` | `/api/documents` | List all indexed documents |
-| `GET` | `/api/documents/{doc_id}/chunks` | Inspect individual chunks |
-| `DELETE` | `/api/documents/{doc_id}` | Delete document and its chunks |
-
-### Query & Chat
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/query` | Synchronous RAG query → answer + sources |
-| `WS` | `/api/chat` | Streaming chat via WebSocket |
-
-### Conversations
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/conversations` | List all conversations |
-| `POST` | `/api/conversations` | Create a new conversation |
-| `GET` | `/api/conversations/{id}` | Get conversation with messages |
-| `PATCH` | `/api/conversations/{id}` | Rename or pin a conversation |
-| `DELETE` | `/api/conversations/{id}` | Delete (cascades messages + sources) |
-| `GET` | `/api/conversations/search?q=` | Search conversations |
-| `GET` | `/api/conversations/{id}/export` | Export as Markdown |
-| `POST` | `/api/conversations/{id}/share` | Generate a share token |
-| `GET` | `/api/shared/{token}` | View shared conversation (read-only) |
-
-### Evaluation
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/messages/{id}/evaluate` | Run 3-metric evaluation |
-| `GET` | `/api/messages/{id}/evaluation` | Get stored evaluation scores |
-
-### Health
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Liveness check |
-
----
-
-## WebSocket Protocol
-
-The `/api/chat` endpoint streams responses through structured JSON events:
-
-```jsonc
-// Client sends:
-{ "query": "What is RAG?", "top_k": 5, "model": "gpt-5-mini", "conversation_id": "..." }
-
-// Server streams (in order):
-{ "type": "status",    "content": "Searching indexed documents..." }
-{ "type": "status",    "content": "Retrieved 5 chunks across 2 files" }
-{ "type": "reasoning", "content": "Let me analyze the context..." }     // CoT tokens
-{ "type": "token",     "content": "Retrieval" }                         // Answer tokens
-{ "type": "token",     "content": "-Augmented" }
-{ "type": "token",     "content": " Generation..." }
-{ "type": "done",      "sources": [...], "message_id": "...", "conversation_id": "..." }
-```
-
----
-
-## Project Structure
-
-```
-src/
-├── api/
-│   ├── main.py                   # FastAPI app with lifespan, CORS, routers
-│   ├── models.py                 # Pydantic v2 request/response schemas
-│   ├── dependencies.py           # BackendDep — the one DI seam for routes
-│   ├── routes/
-│   │   ├── upload.py             # File upload + validation
-│   │   ├── query.py              # REST query + WebSocket streaming
-│   │   ├── documents.py          # Document CRUD + chunk inspection
-│   │   ├── conversations.py      # Conversation CRUD + search/export/share
-│   │   ├── evaluation.py         # On-demand per-message evaluation
-│   │   └── eval.py               # Eval-harness runs, configs, compare
-│   ├── schemas/                  # Eval + telemetry response models
-│   └── services/eval_runs.py     # In-process eval run registry + progress
-├── models/
-│   ├── conversation.py           # Conversation table (cascade relationships)
-│   ├── message.py                # Message + MessageSource tables
-│   ├── document.py               # DocumentRecord metadata
-│   └── evaluation.py             # MessageEvaluation scores
-├── ingestion/
-│   ├── parsers.py                # PARSERS registry — one function per format
-│   ├── loader.py                 # Path → Document, via the registry
-│   └── chunking.py               # TextChunker — three strategies + filters
-├── retrieval/
-│   ├── base.py                   # The Retriever Protocol (the seam)
-│   ├── dense.py, hybrid.py       # Adapters: vector search, BM25 hybrid
-│   ├── corpus.py                 # ChunkCorpus — the BM25 corpus, kept in sync
-│   ├── fusion.py                 # Reciprocal Rank Fusion — merge rankings by rank
-│   ├── sparse_index.py           # BM25 index build + scoring (pure, no store)
-│   ├── reranker.py               # Cross-encoder reranking adapter
-│   ├── query_rewriter.py         # Multi-query rewriting adapter
-│   ├── refusal_handler.py        # Answerability gate
-│   └── composition.py            # The single composition rule → RetrievalPlan
-├── query_engine/
-│   ├── engine.py                 # QueryEngine — retrieve → generate, both paths
-│   ├── prompt.py                 # The single answer prompt + context assembly
-│   ├── streaming.py              # Streaming event protocol
-│   └── telemetry.py              # Per-stage telemetry assembly
-├── conversations/
-│   ├── store.py                  # ConversationStore — CRUD, search, share
-│   ├── history.py                # Sliding window, message saves, auto-title
-│   └── shaping.py                # Pure ORM-row → response-dict functions
-├── evaluation/
-│   ├── judges.py                 # RAGAS-inspired LLM judges (3 metrics)
-│   └── message_evaluator.py      # Per-message scoring + persistence
-├── llm_handler/
-│   ├── __init__.py               # LLMHandler — provider routing + fallback
-│   ├── providers.py              # Prefix → provider, credential resolution
-│   └── adapters/                 # OpenAI-compatible, Anthropic, Ollama, dummy
-├── eval/                         # Offline eval harness (datasets, metrics, CLI)
-├── telemetry/                    # Model pricing + token counting (core)
-├── domain.py                     # Document, Chunk, SearchResult, content_hash
-├── backend.py                    # RAGBackend — the orchestration facade
-├── config.py                     # Centralized configuration constants
-├── database.py                   # SQLite + SQLModel setup
-├── observability.py              # OpenTelemetry → Phoenix, fail-quiet
-└── vector_store.py               # ChromaDB wrapper (embeddings + search)
-
-frontend/src/
-├── pages/
-│   ├── chat.tsx                  # Streaming chat with resizable sources panel
-│   ├── upload.tsx                # Drag-and-drop upload with auto-indexing
-│   ├── documents.tsx             # Document library + chunk inspector
-│   └── shared.tsx                # Read-only shared conversation view
-├── components/
-│   ├── chat/                     # ChatThread, ChatMessage, ThinkingPanel, SourcesPanel
-│   ├── upload/                   # Dropzone, FileQueue
-│   ├── documents/                # DocTable, DocStats, ChunkViewer
-│   └── layout/                   # AppLayout, Sidebar (model selector, top-K, stats)
-├── hooks/                        # useChat, useConversations, useDocuments, useSettings
-└── api/                          # Typed HTTP + WebSocket client
-```
-
----
-
-## Configuration
+## Configuration Reference
 
 All settings are centralized in `src/config.py`:
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `CHUNK_SIZE` | 512 | Characters per chunk |
-| `CHUNK_OVERLAP` | 64 | Overlap between adjacent chunks |
-| `TOP_K_RESULTS` | 5 | Number of chunks retrieved per query |
-| `RETRIEVER_STRATEGY` | `dense` | Which retrieval composition to build — `dense`, `hybrid`, `reranked`, `multi_query`. Env-overridable; an unknown name fails at startup |
-| `RERANK_OVER_FETCH_N` | 20 | Candidates the `reranked` strategy fetches before the cross-encoder narrows them |
-| `HYBRID_BM25_TOP_K` / `HYBRID_DENSE_TOP_K` | 20 / 20 | Candidates each half of `hybrid` contributes before RRF |
-| `HYBRID_RRF_K` | 60 | RRF damping constant |
-| `QUERY_REWRITER_MODEL` | unset | Model that expands queries under `multi_query`. Env-overridable; unset means the strategy refuses to build |
-| `MAX_QUERY_EXPANSIONS` | 3 | Alternative phrasings `multi_query` asks for |
-| `DEFAULT_MODEL` | `gpt-5-mini` | Default answer generation model |
-| `REASONING_MODEL` | `gpt-4.1-nano` | Chain-of-thought model (lightweight) |
-| `EVAL_MODEL` | `gpt-4.1-mini` | Evaluation judge model |
-| `SLIDING_WINDOW_SIZE` | 5 | Conversation turns kept in context |
-| `API_PORT` | 8001 | Server port |
+| Parameter | Default | Description |
+|---|---|---|
+| `DEFAULT_MODEL` | `qwen/qwen3.8-27b` | Primary generation model (env: `DEFAULT_MODEL`) |
+| `REASONING_MODEL` | `qwen/qwen3.8-27b` | CoT reasoning pass model |
+| `EVAL_MODEL` | `qwen/qwen3.8-27b` | Real-time faithfulness evaluation judge |
+| `CHUNK_SIZE` | `512` | Characters per chunk |
+| `CHUNK_OVERLAP` | `64` | Overlap characters between consecutive chunks |
+| `TOP_K_RESULTS` | `5` | Retrieved chunks passed into context prompt |
+| `RETRIEVER_STRATEGY` | `dense` | Strategy selector: `dense`, `hybrid`, `reranked`, `multi_query` |
+| `REFUSAL_ENABLED` | `false` | Enable/disable refusal gate |
+| `REFUSAL_SIMILARITY_THRESHOLD` | `0.25` | Minimum cosine similarity to trigger generation |
+| `HYBRID_RRF_K` | `60` | Damping constant for Reciprocal Rank Fusion |
+| `SQLITE_PATH` | `data/rag.db` | Embedded chat history database |
+| `CHROMA_PATH` | `data/chroma` | Embedded vector database directory |
 
-### LLM Provider Routing
+### Model Provider Auto-Routing
 
-Provider is auto-detected from the model name:
-
-| Prefix | Provider | API Key |
-|--------|----------|---------|
+| Prefix | Provider | Key Environment Variable |
+|---|---|---|
+| `qwen/*`, `groq/*`, `openai/gpt-oss-*` | Groq Cloud | `GROQ_API_KEY` |
+| `gemini-*` | Google AI Studio | `GEMINI_API_KEY` |
 | `gpt-*`, `o1-*`, `o3-*` | OpenAI | `OPENAI_API_KEY` |
 | `claude-*` | Anthropic | `ANTHROPIC_API_KEY` |
-| Everything else | Ollama (local) | None needed |
+| Everything else (`llama3`, etc.) | Ollama Local | None (uses local daemon) |
 
 ---
 
-## Design Decisions
+## Testing & Verification
 
-| Decision | Rationale |
-|----------|-----------|
-| **ChromaDB over Qdrant/Pinecone** | Zero external services — persistent vector store that runs in-process |
-| **Recursive chunking as default** | Preserves paragraph and sentence boundaries vs. naive fixed-size windows |
-| **Separate reasoning model** | Cheap CoT pass (gpt-4.1-nano) avoids doubling cost on the main model |
-| **Separate evaluation model** | Prevents self-evaluation bias — a different model judges the answer |
-| **WebSocket streaming** | Token-by-token delivery for responsive UX vs. waiting for full response |
-| **SQLite + SQLModel** | Zero-ops relational storage — conversations, messages, and sources persist across restarts |
-| **React over Streamlit** | Full control over real-time streaming, layout, and component architecture |
-| **Multi-provider adapter** | Swap models by name with zero code changes — same interface for all providers |
-| **Idempotent document upsert** | Re-uploading overwrites by content hash — no duplicate chunks |
-
----
-
-## Testing
+Run the complete test suite (558 tests):
 
 ```bash
-python -m pytest tests/ -v                                    # Full test suite
-python -m pytest tests/ --cov=src --cov-report=term-missing   # With coverage report
-python -m pytest tests/test_evaluation.py -v                  # Single module
+# Run all unit and integration tests
+python -m pytest tests/ -v
+
+# Run with coverage report
+python -m pytest tests/ --cov=src --cov-report=term-missing
 ```
-
-Tests use ChromaDB's `EphemeralClient` for isolated vector store testing and deterministic fixtures from `conftest.py`.
-
----
-
-## Environment Variables
-
-All optional. The system runs fully without any keys using local ChromaDB embeddings and dummy LLM responses.
-
-| Variable | Purpose |
-|----------|---------|
-| `OPENAI_API_KEY` | OpenAI models (GPT-5, GPT-4.1, o-series) |
-| `ANTHROPIC_API_KEY` | Anthropic models (Claude Opus, Sonnet, Haiku) |
-| `GLM_API_KEY` / `GLM_BASE_URL` | GLM / Zhipu models; the base URL is an optional endpoint override |
-| `RETRIEVER_STRATEGY` | Retrieval composition: `dense` (default), `hybrid`, `reranked`, `multi_query` |
-| `QUERY_REWRITER_MODEL` | Required *only* for `RETRIEVER_STRATEGY=multi_query`; costs one extra LLM call per question |
 
 ---
 
 <div align="center">
 
-<sub>Built with FastAPI · React · ChromaDB · scikit-learn</sub>
+<sub>Built with FastAPI · React · ChromaDB · Groq · scikit-learn</sub>
 
 </div>
