@@ -56,7 +56,7 @@
 
 **Model Answer**:
 > "We employ a defense-in-depth strategy across three independent levels:
-> 1. **Deterministic Refusal Gating (Phase 2 Lever 2g)**: Before calling the LLM, `RefusalHandler` inspects the candidate retrieval set. If the maximum similarity score across the set falls below the threshold ($\tau = 0.25$), the pipeline short-circuits immediately, returning a fixed refusal message with 0 LLM tokens consumed.
+> 1. **Deterministic Refusal Gating (Phase 2 Lever 2g)**: Before calling the LLM, `RefusalHandler` inspects the candidate retrieval set. If the maximum similarity score across the set falls below the threshold ($\tau = 0.35$, configured via `REFUSAL_SIMILARITY_THRESHOLD` in `src/config.py`), the pipeline short-circuits immediately, returning a fixed refusal message with 0 LLM tokens consumed.
 > 2. **Strict Context-Bounded Prompts**: The generation prompt explicitly instructs the LLM: *'Answer strictly using the provided context. If the context does not contain sufficient facts, state that you cannot answer.'*
 > 3. **Post-Generation LLM-as-a-Judge Evaluation**: In `MessageEvaluator`, a secondary judge model evaluates the answer for **Faithfulness** against the retrieved chunks, detecting ungrounded claims."
 
@@ -80,7 +80,7 @@
 **The Trap**: Tests understanding of conversational state and sliding window memory management.
 
 **Model Answer**:
-> "In `src/conversations.py`, we implement a strict sliding window of prior completed message pairs (default: 3 pairs = 6 messages):
+> "In `src/conversations/history.py`, we implement a strict sliding window of prior completed message pairs (default: 5 pairs = 10 messages, configured via `SLIDING_WINDOW_SIZE` in `src/config.py`):
 > 1. **Sliding Window Storage**: SQLite stores the full history for UI display, but `ConversationHistory` extracts only the last $N$ turns for the LLM prompt.
 > 2. **Unpaired Turn Guard**: When generating an answer, the current user query is unpaired; the sliding window only includes previously answered turns, preventing dangling prompt injection.
 > 3. **Retrieval Isolation**: Retrieval searches are executed using the current natural language query (or optionally expanded through `MultiQueryRetriever`), preventing historical chat noise from diluting vector search relevance."

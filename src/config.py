@@ -124,7 +124,7 @@ MAX_QUERY_EXPANSIONS: int = 3
 # WHY the refusal defaults live here and not only in the eval config: the gate
 #      threshold and its user-facing text are product decisions.
 REFUSAL_ENABLED: bool = os.getenv("REFUSAL_ENABLED", "false").lower() in ("true", "1")
-REFUSAL_SIMILARITY_THRESHOLD: float = float(os.getenv("REFUSAL_SIMILARITY_THRESHOLD", "0.25"))
+REFUSAL_SIMILARITY_THRESHOLD: float = float(os.getenv("REFUSAL_SIMILARITY_THRESHOLD", "0.35"))
 REFUSAL_NO_ANSWER_TEXT: str = os.getenv(
     "REFUSAL_NO_ANSWER_TEXT", "I don't have enough information to answer that."
 )

@@ -94,7 +94,20 @@ Wei et al. (2022) demonstrated that prompting models to generate step-by-step re
 
 ## Chapter 3: System Architecture & Design
 
-### 3.1 Hexagonal Architecture (Ports and Adapters)
+### 3.1 Requirements Analysis
+
+#### 3.1.1 Functional Requirements (FR)
+- **FR-1 (Multi-Format Ingestion & Page Extraction)**: The system must ingest scientific documents across multiple formats (PDF, DOCX, TXT, MD, HTML, CSV, JSON) and parse physical page boundaries (`page_number`) without data loss.
+- **FR-2 (Hybrid Search & Rank Fusion)**: The system must execute simultaneous dense vector search (`all-MiniLM-L6-v2`) and sparse keyword search (`BM25`), fusing results via Reciprocal Rank Fusion ($k=60$) without requiring score normalization.
+- **FR-3 (Deterministic Refusal Gate)**: The system must evaluate candidate relevance and intercept out-of-domain queries when $\max(\text{score}) < 0.35$, returning an immediate refusal without invoking external LLMs.
+- **FR-4 (Two-Pass WebSocket Streaming)**: The system must stream intermediate Chain-of-Thought (CoT) reasoning tokens in Pass 1, followed by grounded answer generation and verified citations in Pass 2.
+
+#### 3.1.2 Non-Functional Requirements (NFR)
+- **NFR-1 (Latency & Performance)**: Sub-second candidate retrieval ($< 300\text{ms}$) on commodity CPU hardware.
+- **NFR-2 (Zero-Cost Testability)**: Automated test suites must run completely offline with 0 API token consumption via pluggable test doubles.
+- **NFR-3 (Data Integrity & Storage Invariants)**: ChromaDB and SQLite must follow a strict two-phase write order (ChromaDB first, then SQLite) with SHA-256 content deduplication to prevent orphan records.
+
+### 3.2 Hexagonal Architecture (Ports and Adapters)
 The application decouples business logic from external frameworks:
 - **Core Domain**: `Document`, `Chunk`, `SearchResult`, `StageTelemetry`.
 - **Ports (Seams)**: `Retriever`, `ProviderAdapter`, `ConversationStore`.
@@ -138,13 +151,146 @@ graph TD
     RAGBackend --> SQLiteStore
 ```
 
-### 3.2 Document Ingestion Pipeline & Physical Page Provenance
+### 3.3 Data Flow Diagram (DFD Level-1)
+
+```mermaid
+flowchart TD
+    subgraph Ingestion_Pipeline ["1. Document Ingestion Pipeline"]
+        A[User Upload: PDF / DOCX / TXT] --> B[PyPDFParser: Extract Page-by-Page]
+        B -->|meta: page_number, raw_text| C[TextChunker: 512 chars / 64 overlap]
+        C -->|List of Chunks with page_number| D[SHA-256 Hash Dedup Engine]
+        D -->|Upsert Chunks + Embeddings| E[(ChromaDB: HNSW Cosine Index)]
+        D -->|Insert DocumentRecord| F[(SQLite: rag.db)]
+    end
+
+    subgraph Query_Pipeline ["2. Hybrid Query & Defense Pipeline"]
+        G[User Query via WebSocket /ws/query] --> H[Retriever Seam Router]
+        H -->|Sparse Branch| I[BM25 Okapi Index]
+        H -->|Dense Branch| J[ONNX all-MiniLM-L6-v2 Embedder]
+        J --> E
+        I --> K[Reciprocal Rank Fusion k=60]
+        E --> K
+        K --> L[Neural Cross-Encoder Reranker]
+        L --> M{Refusal Gate: max score >= 0.35?}
+        M -->|No: Out of Domain| N[Immediate Refusal: 0 LLM Tokens Consumed]
+        M -->|Yes: Grounded| O[Two-Pass Streaming Generator]
+        O -->|Pass 1: Reasoning Tokens| P[Client UI: Thoughts Accordion]
+        O -->|Pass 2: Answer Tokens + Citations| Q[Client UI: Grounded Answer with p. badges]
+        O -->|Persist History + Telemetry| F
+    end
+```
+
+### 3.4 Relational Database Design (Entity-Relationship Diagram)
+
+```mermaid
+erDiagram
+    DocumentRecord ||--o{ MessageSource : "referenced_in"
+    Conversation ||--|{ Message : "contains"
+    Message ||--o{ MessageSource : "cites"
+    Message ||--o| MessageEvaluation : "evaluated_by"
+
+    DocumentRecord {
+        string id PK "SHA-256 Content Hash"
+        string filename "Source File Name"
+        string file_type "pdf, docx, txt, etc."
+        int file_size_bytes "Size on disk"
+        int chunks_count "Total generated chunks"
+        datetime upload_date "Timestamp"
+    }
+
+    Conversation {
+        string id PK "UUID4"
+        string title "Auto-generated Title"
+        boolean pinned "Pin status"
+        datetime created_at "Created Timestamp"
+        datetime updated_at "Last Activity"
+        string share_token "Public Share Token"
+    }
+
+    Message {
+        string id PK "UUID4"
+        string conversation_id FK "References Conversation.id"
+        string role "user | assistant"
+        string content "Message Markdown Text"
+        string model "LLM Model Used"
+        int token_count "Total Tokens"
+        datetime created_at "Timestamp"
+    }
+
+    MessageSource {
+        int id PK "Auto-increment ID"
+        string message_id FK "References Message.id"
+        string doc_id "Document Content Hash"
+        string chunk_id "Chunk Unique Hash"
+        string filename "Source Document Name"
+        int page_number "Physical PDF Page Number"
+        float score "Relevance / Similarity Score"
+        string excerpt "Grounding Context Text"
+    }
+
+    MessageEvaluation {
+        int id PK "Auto-increment ID"
+        string message_id FK "References Message.id"
+        float faithfulness "Judge Faithfulness Score"
+        float answer_relevancy "Relevance Score"
+        float context_precision "Precision Score"
+        string judge_model "Model used for judging"
+        datetime evaluated_at "Timestamp"
+    }
+```
+
+### 3.5 Two-Pass WebSocket Streaming Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Researcher / User
+    participant Frontend as React 19 Client
+    participant FastApi as FastAPI Gateway (/ws/query)
+    participant QueryEngine as QueryEngine & Refusal
+    participant Hybrid as Hybrid Retriever (BM25 + ChromaDB)
+    participant FastLLM as Reasoning LLM (Gemini Flash / nano)
+    participant MainLLM as Answer LLM (Gemini / GPT-4o)
+    participant DB as SQLite (rag.db)
+
+    User->>Frontend: Submit Query ("Explain scaled dot-product")
+    Frontend->>FastApi: WebSocket send({query, model, top_k})
+    FastApi->>DB: Save User Query to History
+    FastApi->>QueryEngine: ask_stream(query, conversation_id)
+    QueryEngine->>Hybrid: retrieve(query, top_k=5)
+    Hybrid-->>QueryEngine: candidates with scores & page_numbers
+    
+    QueryEngine->>QueryEngine: Check max(score) >= 0.35
+    alt Score < 0.35 (Unanswerable / Out of Domain)
+        QueryEngine-->>FastApi: Emit Refusal Event
+        FastApi-->>Frontend: "I don't have enough information..." (0 Tokens)
+    else Score >= 0.35 (Answerable)
+        FastApi-->>Frontend: Event: ("status", "Retrieved 5 chunks")
+        QueryEngine->>FastLLM: Stream CoT reasoning prompt
+        loop Streaming Reasoning
+            FastLLM-->>QueryEngine: reasoning_token
+            QueryEngine-->>FastApi: Event: ("reasoning", token)
+            FastApi-->>Frontend: Render in Collapsible Thoughts Box
+        end
+        QueryEngine->>MainLLM: Stream Answer Prompt (Context + Reasoning)
+        loop Streaming Answer
+            MainLLM-->>QueryEngine: answer_token
+            QueryEngine-->>FastApi: Event: ("token", token)
+            FastApi-->>Frontend: Markdown Streaming Render
+        end
+        QueryEngine->>DB: Persist Assistant Message + Citations (page_numbers)
+        QueryEngine-->>FastApi: Event: ("done", {sources, telemetry})
+        FastApi-->>Frontend: Render (p. 4) Badges & Telemetry
+    end
+```
+
+### 3.6 Document Ingestion Pipeline & Physical Page Provenance
 To solve RQ1, the ingestion parser decomposes PDFs per physical page:
 1. `parse_pdf()` populates `metadata["pages"] = [{"page_number": idx + 1, "text": page_text}]`.
 2. `TextChunker` chunks each page independently, guaranteeing that no chunk spans across page boundaries.
 3. Chunks inherit the scalar `page_number` attribute, while `metadata["pages"]` is stripped to satisfy ChromaDB primitive-only metadata constraints.
 
-### 3.3 Composable Retrieval Seam
+### 3.7 Composable Retrieval Seam
 The `Retriever` protocol guarantees:
 ```python
 def retrieve(self, query: str, top_k: int) -> list[SearchResult]: ...
@@ -152,13 +298,13 @@ def retrieve(self, query: str, top_k: int) -> list[SearchResult]: ...
 Retrieval strategies are composed linearly (ADR 0006):
 $$\text{Query} \xrightarrow{\text{Expansion}} \text{MultiQueryRetriever} \xrightarrow{\text{Candidate Retrieval}} \text{HybridRetriever} \xrightarrow{\text{Rescoring}} \text{CrossEncoderReranker}$$
 
-### 3.4 Deterministic Refusal Gating
+### 3.8 Deterministic Refusal Gating (Phase 2 Lever 2g)
 To address RQ3, `RefusalHandler` short-circuits the pipeline before LLM generation:
 ```python
-if max(c.score for c in candidates) < threshold:
+if max(c.score for c in candidates) < 0.35:
     return [], refusal_text
 ```
-By taking the maximum score across the retrieved set rather than the first element, the gate functions reliably on both monotone cosine distributions and non-monotone fused RRF rank distributions.
+By taking the maximum score across the candidate set rather than the first element, the gate functions reliably on both monotone cosine distributions and non-monotone fused RRF rank distributions, achieving 90% refusal correctness on out-of-domain questions with 0 LLM tokens billed.
 
 ---
 
