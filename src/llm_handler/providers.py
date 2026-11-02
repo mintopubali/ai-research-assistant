@@ -235,6 +235,10 @@ def _ollama_client_factory() -> Callable[[], object]:
 
 def list_models(provider: str, model: str, api_key: str | None, ollama_base_url: str) -> list[str]:
     """Return available model names for a provider (out of scope; preserved)."""
+    if provider == "gemini":
+        return list(GEMINI_MODELS)
+    if provider == "groq":
+        return list(GROQ_MODELS)
     if provider == "openai":
         return _openai_list_models(api_key)
     if provider == "anthropic":

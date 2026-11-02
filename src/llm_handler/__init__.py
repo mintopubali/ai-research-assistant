@@ -67,7 +67,7 @@ class LLMHandler:
 
     def __init__(
         self,
-        model: str = "gpt-4",
+        model: str = "qwen/qwen3.8-27b",
         temperature: float = 0.7,
         # WHY 4096: 1024 truncates detailed Q&A answers mid-sentence; 4096 gives
         #           room for thorough, formatted answers while bounding cost.

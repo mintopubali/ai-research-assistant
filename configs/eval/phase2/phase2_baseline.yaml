@@ -3,10 +3,10 @@ description: "Baseline anchor for the Phase 2 matrix — identical to baseline_s
 pipeline:
   chunker: {strategy: recursive, chunk_size: 512, chunk_overlap: 64}
   retriever: {top_k: 5}
-  generator: {model: gpt-5-mini, reasoning_model: gpt-4.1-nano}
+  generator: {model: qwen/qwen3.8-27b, reasoning_model: qwen/qwen3.8-27b}
 eval:
   datasets: [squad_v2_dev_200]
-  judge_model: gpt-4.1-mini
+  judge_model: qwen/qwen3.8-27b
   bootstrap_n: 1000
   permutation_n: 10000
   seed: 42

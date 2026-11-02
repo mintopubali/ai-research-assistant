@@ -1,5 +1,5 @@
 name: "baseline"
-description: "Current production defaults: recursive chunker, gpt-5-mini answer model, gpt-4.1-nano reasoning model."
+description: "Current production defaults: recursive chunker, Qwen 3.8 27B answer model and judge model."
 pipeline:
   chunker:
     strategy: "recursive"
@@ -8,11 +8,11 @@ pipeline:
   retriever:
     top_k: 5
   generator:
-    model: "gpt-5-mini"
-    reasoning_model: "gpt-4.1-nano"
+    model: "qwen/qwen3.8-27b"
+    reasoning_model: "qwen/qwen3.8-27b"
 eval:
   datasets: ["squad_v2_dev_200", "ml_papers_v1"]
-  judge_model: "gpt-4.1-mini"
+  judge_model: "qwen/qwen3.8-27b"
   bootstrap_n: 1000
   permutation_n: 10000
   seed: 42
